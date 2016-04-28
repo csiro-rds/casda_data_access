@@ -1,0 +1,195 @@
+/*
+ * Gradle build script for CSIRO CASDA Data Access web application (casda_data_access).
+ * 
+ * Built for Gradle v2.6
+ *
+ * Primary tasks are:
+ *  clean - Remove the contents of the build folder ready for a full rebuild.
+ *  build - Compiles the code, builds the war, and runs the tests (this is the most commonly used command)
+ *  eclipse - Usually after cleanEclipse - rebuild the eclipse (or STS) classpath and so on.
+ */
+buildscript {
+    repositories { 
+        mavenCentral()
+    }
+    dependencies {
+        classpath("org.hidetake:gradle-ssh-plugin:0.3.10")
+    }
+}
+
+task wrapper(type: Wrapper) { gradleVersion = '2.6' }
+    
+apply plugin: 'java'
+apply plugin: 'eclipse-wtp'
+apply plugin: 'war'
+apply plugin: 'maven-publish'
+apply plugin: 'ssh'
+    
+group = 'au.csiro'
+
+project.ext.baseName = 'casda_data_access'
+project.description = 'CSIRO CASDA Project - CASDA Data Access'
+        
+ext {
+	majorVersion = 1
+	minorVersion = 2
+    springBootVer = '1.1.12.RELEASE'
+    springSecurityVer = '3.2.7.RELEASE'
+    tomcatVer = '7.0.59'
+}
+        
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenLocal() // Required when we use locally-built versions of CSIRO projects
+    mavenCentral()
+    maven { url "http://jenkins-cdc.it.csiro.au:8085/nexus/content/repositories/cd/" }
+    maven { url "http://jenkins-cdc.it.csiro.au:8085/nexus/content/repositories/releases/" }
+    maven { url "http://jenkins-cdc.it.csiro.au:8085/nexus/content/repositories/thirdparty/" }
+    maven { url "http://www.hibernatespatial.org/repository" }
+    maven { url "http://repo.boundlessgeo.com/main" }
+    jcenter()
+}
+
+configurations { 
+    providedRuntime 
+    all*.exclude group: "org.springframework.boot", module: "spring-boot-starter-logging"
+    all*.exclude group: "xerces", module: "xercesImpl"
+    all*.exclude group: "org.hamcrest", module: "hamcrest-library"
+    all*.exclude group: "org.hamcrest", module: "hamcrest-core"
+}
+
+eclipse.classpath.downloadJavadoc = true // defaults to 'false'
+
+dependencies {
+    compile('au.csiro:casda_commons:1.0.165') {
+        // remove this exclude when we move to tomcat 8
+        exclude module:"hibernate-core"
+    }
+    
+    compile 'au.csiro:job_manager:1.1.19'
+
+    compile 'org.apache.logging.log4j:log4j-web:2.1'
+    compile("org.springframework.boot:spring-boot-starter-integration:${springBootVer}")
+    compile("org.springframework.boot:spring-boot-starter-actuator:${springBootVer}")
+    
+    compile("org.springframework.boot:spring-boot-starter-web:${springBootVer}") 
+    { 
+        // exclude the tomcat libraries so they are not included in the war file
+        exclude group:"org.springframework.boot", module: "spring-boot-starter-tomcat"
+        exclude group: "org.apache.tomcat.embed"
+    }
+    providedRuntime("org.springframework.boot:spring-boot-starter-tomcat:${springBootVer}")
+    
+    compile("org.springframework.boot:spring-boot-starter-ws:${springBootVer}") 
+    compile("org.springframework.boot:spring-boot-starter-data-jpa:${springBootVer}") 
+    {
+        // excluding these doesn't work with tomcat 7, try to exclude for tomcat 8
+        // exclude group: "org.apache.tomcat"
+    }
+    // reinstate for tomcat 8 if you can exclude the tomcat libs from
+    // providedRuntime("org.apache.tomcat:tomcat-jdbc:${tomcatVer}")
+    
+    compile("org.springframework.boot:spring-boot-starter-security:${springBootVer}")
+    
+    // reinstate for spring 1.2.5
+    // compile("org.springframework.boot:spring-boot-starter-log4j2:${springBootVer}")
+
+    compile("org.springframework.security:spring-security-taglibs:${springSecurityVer}")
+    
+    compile("org.postgresql:postgresql:9.3-1103-jdbc41")
+    
+    // for spatial tools such as JTS for postgis dialect
+    compile("org.hibernate:hibernate-spatial:4.3") 
+    {
+        //use newer version of postgres driver
+        exclude(module: 'postgresql')
+    }
+
+    compile("fr.unistra.saada:uws:4")
+    
+    compile("org.apache.httpcomponents:httpclient:4.5")
+    
+    // Swagger UI for showing interactive API docs
+    compile("com.mangofactory:swagger-springmvc:1.0.2")
+    compile "org.ajar:swagger-spring-mvc-ui:0.4"
+    compile("com.google.guava:guava:18.0") 
+
+	//jstl for jsp rendering
+    compile("jstl:jstl:1.2")
+    
+    compile("javax.servlet:javax.servlet-api:3.1.0")
+    
+    testCompile("org.springframework.boot:spring-boot-starter-test:${springBootVer}")
+    testCompile("com.h2database:h2:1.4.188")
+    // H2 extension for geometry
+    testCompile("org.opengeo:geodb:0.8")
+        
+    testCompile("junit:junit:4.12")
+    testCompile("org.hamcrest:java-hamcrest:2.0.0.0")
+    testCompile("org.hamcrest:hamcrest-junit:2.0.0.0")
+    testCompile('org.mockito:mockito-core:1.10.19')
+    
+    // For testing JSON Path expressions
+    testCompile("com.jayway.jsonpath:json-path:0.8.1")
+    
+    testCompile 'xmlunit:xmlunit:1.6'
+    
+}
+
+apply from: 'gradle/versioning.gradle'
+
+war {
+    duplicatesStrategy = "EXCLUDE"
+    baseName = 'casda_data_access'
+}
+war.dependsOn makeVersionProps
+
+//=====================================================================================================================
+//
+// Include other build files
+//
+//=====================================================================================================================
+
+// Produces pmd, findbugs and checkstyle reports.
+apply from: 'gradle/report.gradle'
+
+// Produces jacoco code coverage report.
+apply from: 'gradle/coverage-report.gradle'
+
+// We conditionally apply the publish script so that we don't need the properties for all builds.
+if (gradle.startParameter.taskNames.any{it =~ /publish/}) {
+    apply from: 'gradle/publish.gradle'
+}
+
+// We conditionally apply the deploy script so that we don't need the properties for all builds.
+if (gradle.startParameter.taskNames.contains('deployToServer')) {
+    apply from: 'gradle/deploy.gradle'
+}
+
+// The status task hits the CASDA Rules service's health check and throws an exception if its not healthy
+if (gradle.startParameter.taskNames.contains('status')) {
+    apply from: 'gradle/status.gradle'
+}
+
+if (!project.hasProperty('targetEnv') && gradle.startParameter.taskNames.any{it =~ /[lL]ocal/ }) { // Only called locally
+    apply from: 'gradle/local.tomcat.gradle'
+}
+
+processResources {
+    from("src/main/resources") {
+        include "application.properties"
+        expand(project.properties) 
+    }
+}
+
+//=====================================================================================================================
+//
+// Eclipse Configuration
+//
+//=====================================================================================================================
+
+eclipse {
+    project { natures 'org.springsource.ide.eclipse.gradle.core.nature' }
+}

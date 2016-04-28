@@ -1,0 +1,11 @@
+/build/
+/bin/
+.project
+.settings/
+.classpath
+.gradle/
+.springBeans
+packager.jar
+uwsDir/
+/*.checksum
+/*.fits

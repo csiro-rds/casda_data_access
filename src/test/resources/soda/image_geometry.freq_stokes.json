@@ -1,0 +1,56 @@
+{
+    "axes": [
+    	{
+ 			"name": "RA", 
+ 			"numPixels": "1", 
+ 			"pixelSize": "1.0000000000000e+00", 
+ 			"pixelUnit": "deg" 
+ 		}, 
+ 		{ 
+ 			"name": "DEC", 
+ 			"numPixels": "1", 
+ 			"pixelSize": "1.0000000000000e+00", 
+ 			"pixelUnit": "deg" 
+ 		},     
+        {
+            "centre": "8.5000000000000e+08",
+            "max": "9.2500000000000e+08",
+            "min": "7.7500000000000e+08",
+            "name": "FREQ",
+            "numPixels": "3",
+            "pixelSize": "5.0000000000000e+07",
+            "pixelUnit": "Hz"
+        },
+        {
+            "centre": "1.0000000000000e+00",
+            "max": "4.5000000000000e+00",
+            "min": "0.5000000000000e+00",
+            "name": "STOKES",
+            "numPixels": "4",
+            "pixelSize": "1.0000000000000e+00",
+            "pixelUnit": " "
+        }
+    ],
+    "centre": {
+        "DEC": "0.5",
+        "RA": "0.5"
+    },
+    "corners": [
+        {
+            "DEC": "0.0",
+            "RA": "0.0"
+        },
+        {
+            "DEC": "0.0",
+            "RA": "1.0"
+        },
+        {
+            "DEC": "1.0",
+            "RA": "1.0"
+        },
+        {
+            "DEC": "1.0",
+            "RA": "0.0"
+        }
+    ]
+}

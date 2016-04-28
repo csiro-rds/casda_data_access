@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+ <NgamsStatus>
+<Status CompletionTime="2014-12-19T10:02:18.932" Date="2014-12-19T10:02:18.893" HostId="casda-t-app:7777" Message="Successfully handled command STATUS" RequestId="127" RequestTime="2014-12-19T10:02:18.880" State="ONLINE" Status="SUCCESS" SubState="IDLE" Version="v5.5-MWA/2013-08-05T11:00:00" />
+<DiskStatus Archive="ASKAP-ARCHIVE-VM" AvailableMb="103147323" BytesStored="880704853928" Checksum="" Completed="0" CompletionDate="" DiskId="de757a4de0ac71b4e547cf0561d775dd" HostId="casda-t-app:7777" InstallationDate="2014-09-01T09:30:14.052" LastCheck="2014-12-19T00:53:47.716" LogicalName="BULK-M-000002" Manufacturer="SGI/NetApp" MountPoint="/CASDA/application/ngas/ngas_T/NGAS/volume2" Mounted="1" NumberOfFiles="175" SlotId="volume2" TotalDiskWriteTime="0.0" Type="IS5600_IBSAN">
+<FileStatus AccessDate="" Checksum="-57003024" ChecksumPlugIn="ngamsGenCrc32" Compression="NONE" CreationDate="2014-12-19T09:25:03.000" FileId="observations-8888883-catalogues-AS007a-continuum.xml" FileName="ASKAPArchive/2014-12-19/1/observations-8888883-catalogues-AS007a-continuum.xml" FileSize="6848" FileStatus="00000000" FileVersion="1" Format="text/xml" Group="" Ignore="0" IngestionDate="2014-12-19T09:25:15.908" ModificationDate="" Owner="" Permissions="" Tag="" TotalIoTime="-1000" UncompressedFileSize="6848" />
+</DiskStatus>
+ </NgamsStatus>

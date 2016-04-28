@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<uws:job xmlns:uws="http://www.ivoa.net/xml/UWS/v1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <uws:jobId><![CDATA[ad1c7b3c-f478-426e-81d0-cb6702d009e2]]></uws:jobId>
+    <uws:runId xsi:nil="true" />
+    <uws:ownerId xsi:nil="true" />
+    <uws:phase>COMPLETED</uws:phase>
+    <uws:quote xsi:nil="true" />
+    <uws:startTime>2015-12-06T18:25:13.823+1100</uws:startTime>
+    <uws:endTime>2015-12-06T17:33:12.431+1100</uws:endTime>
+    <uws:executionDuration>0</uws:executionDuration>
+    <uws:destruction>2999-12-13T17:33:12.431+1100</uws:destruction>
+    <uws:parameters>
+        <uws:parameter id="id"><![CDATA[V6PwDSDhW04rp0dXkiYfclFNPRi7klfBk6dNhY0vmMA]]></uws:parameter>
+    </uws:parameters>
+    <uws:results>
+        <uws:result id="visibility-0.checksum" xlink:type="simple" xlink:href="cPeqkDzgAmWgghwpjBhegtrVGVBMOE%2Frequests%2Fad1c7b3c-f478-426e-81d0-cb6702d009e2%2Fnull.checksum" />
+        <uws:result id="visibility-0" xlink:type="simple" xlink:href="cPeqkDzgAmWgghwpjBhegtrVGVBMOE%2Frequests%2Fad1c7b3c-f478-426e-81d0-cb6702d009e2%2Fnull" />
+    </uws:results>
+    <uws:errorSummary xsi:nil="true" />
+</uws:job>

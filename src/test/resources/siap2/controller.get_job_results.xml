@@ -1,0 +1,8 @@
+<uws:results xmlns:uws="http://www.ivoa.net/xml/UWS/v1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<uws:result id="Result4" xlink:type="arc" xlink:href="http%3A%2F%2Fbing.com" />
+	<uws:result id="Result3" xlink:type="locator" xlink:href="http%3A%2Fgoogle.coms" />
+	<uws:result id="Result1" xlink:type="extended" xlink:href="http%3A%2F%2Fwww.w3.org%2FTR%2Fxlink%2F%23linking-elements" />
+	<uws:result id="Result7" xlink:type="title" xlink:href="http%3A%2F%2Fwww.csiro.au" />
+	<uws:result id="Result6" xlink:type="none" xlink:href="http%3A%2F%2Fwww.csiro.au" />
+	<uws:result id="Result5" xlink:type="resource" xlink:href="http%3A%2F%2Fyahoo.com" />
+</uws:results>

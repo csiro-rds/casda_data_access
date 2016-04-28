@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<NgamsStatus>
+<Status CompletionTime="2014-12-19T11:08:11.676" Date="2014-12-19T11:08:11.682" HostId="casda-t-app:7777" LastRequestStatUpdate="2014-12-19T11:08:11.676" Message="NGAMS_ER_UNAVAIL_FILE:4019:ERROR: File with ID: observations-8888883-catalogues-AS007a-continduum.xml appears not to be available." RequestId="128" RequestTime="2014-12-19T11:08:11.628" State="ONLINE" Status="FAILURE" SubState="IDLE" Version="v5.5-MWA/2013-08-05T11:00:00" />
+</NgamsStatus>

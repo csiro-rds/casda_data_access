@@ -1,0 +1,38 @@
+{
+    "axes": [
+		{ 
+			"name": "RA", 
+			"numPixels": "2048", 
+			"pixelSize": "3.3333333333330e-03", 
+			"pixelUnit": "deg" 
+		}, 
+		{ 
+			"name": "DEC", 
+			"numPixels": "2048", 
+			"pixelSize": "3.3333333333330e-03", 
+			"pixelUnit": "deg" 
+		}    
+    ],
+    "centre": {
+        "DEC": "0.5",
+        "RA": "0.5"
+    },
+    "corners": [
+        {
+            "DEC": "0.0",
+            "RA": "0.0"
+        },
+        {
+            "DEC": "0.0",
+            "RA": "1.0"
+        },
+        {
+            "DEC": "1.0",
+            "RA": "1.0"
+        },
+        {
+            "DEC": "1.0",
+            "RA": "0.0"
+        }
+    ]
+}
