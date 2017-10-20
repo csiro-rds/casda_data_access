@@ -17,7 +17,7 @@
 	       </accessURL>
 	   </interface>
 	</capability>
-    <capability standardID="ivo://ivoa.net/std/AccessData#sync">
+    <capability standardID="ivo://ivoa.net/std/SODA#sync-1.0">
         <interface xsi:type="vod:ParamHTTP" role="std" version="1.0">
            <accessURL use="full">
                ${syncURL}
@@ -32,7 +32,7 @@
            	</param>
        </interface>
     </capability>
-    <capability standardID="ivo://ivoa.net/std/AccessData#async">
+    <capability standardID="ivo://ivoa.net/std/SODA#async-1.0">
         <interface xsi:type="vod:ParamHTTP" role="std" version="1.0">
            <accessURL use="full">
                ${asyncURL}
@@ -161,7 +161,7 @@
            </accessURL>
            <queryType>GET</queryType>
            <queryType>POST</queryType>
-           <queryType>DELETE</queryType>
+           <!-- queryType>DELETE</queryType -->
            <resultType>application/xml</resultType>
            <param use="required" std="true">
            		<name>jobId</name>
@@ -181,7 +181,7 @@
                ${asyncURL}/{jobId}/parameters/{name}
            </accessURL>
            <queryType>GET</queryType>
-           <queryType>DELETE</queryType>
+           <!-- queryType>DELETE</queryType -->
            <resultType>application/xml</resultType>
            <param use="required" std="true">
            		<name>jobId</name>

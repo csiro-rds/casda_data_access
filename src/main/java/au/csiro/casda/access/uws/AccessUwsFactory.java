@@ -39,7 +39,9 @@ public class AccessUwsFactory extends AbstractUWSFactory
     protected final int hoursToExpiryDefault;
 
     @SuppressWarnings({ "checkstyle:visibilitymodifier", "checkstyle:javadocvariable" })
-    protected final int hoursToExpirySiapSync;
+    protected final int hoursToExpirySodaSync;
+    
+    private final String siapSharedSecretKey;
 
     /**
      * Create a new AccessUwsFactory instance.
@@ -50,18 +52,22 @@ public class AccessUwsFactory extends AbstractUWSFactory
      *            The packager instance which will be doing the work for each job.
      * @param hoursToExpiryDefault
      *            the default number of hours until a job will expire
-     * @param hoursToExpirySiapSync
-     *            the number of hours to expiry for a SIAP sync job
+     * @param hoursToExpirySodaSync
+     *            the number of hours to expiry for a SODA sync job
+     * @param siapSharedSecretKey
+     *            the key for decrypting request tokens
      */
     @Autowired
     public AccessUwsFactory(DataAccessService dataAccessService, Packager packager,
             @Value("${hours.to.expiry.default}") int hoursToExpiryDefault,
-            @Value("${hours.to.expiry.siap_sync}") int hoursToExpirySiapSync)
+            @Value("${hours.to.expiry.soda_sync}") int hoursToExpirySodaSync, 
+            @Value("${siap.shared.secret.key}") String siapSharedSecretKey)
     {
         this.dataAccessService = dataAccessService;
         this.packager = packager;
         this.hoursToExpiryDefault = hoursToExpiryDefault;
-        this.hoursToExpirySiapSync = hoursToExpirySiapSync;
+        this.hoursToExpirySodaSync = hoursToExpirySodaSync;
+        this.siapSharedSecretKey = siapSharedSecretKey;
     }
 
     /*
@@ -72,6 +78,7 @@ public class AccessUwsFactory extends AbstractUWSFactory
     @Override
     public JobThread createJobThread(UWSJob uwsJob) throws UWSException
     {
-        return new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySiapSync);
+        return new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, 
+        		hoursToExpirySodaSync, siapSharedSecretKey);
     }
 }

@@ -10,11 +10,11 @@
     <uws:executionDuration>0</uws:executionDuration>
     <uws:destruction>2999-12-13T17:33:12.431+1100</uws:destruction>
     <uws:parameters>
-        <uws:parameter id="id"><![CDATA[V6PwDSDhW04rp0dXkiYfclFNPRi7klfBk6dNhY0vmMA]]></uws:parameter>
+        <uws:parameter id="id"><![CDATA[V6PwDSDhW04rp0dXkiYfcrphfUdanKDX3iiyjQltHM3VV1TWKMTHxNWpbBqWq7cj]]></uws:parameter>
     </uws:parameters>
     <uws:results>
-        <uws:result id="visibility-0.checksum" xlink:type="simple" xlink:href="cPeqkDzgAmWgghwpjBhegtrVGVBMOE%2Frequests%2Fad1c7b3c-f478-426e-81d0-cb6702d009e2%2Fnull.checksum" />
-        <uws:result id="visibility-0" xlink:type="simple" xlink:href="cPeqkDzgAmWgghwpjBhegtrVGVBMOE%2Frequests%2Fad1c7b3c-f478-426e-81d0-cb6702d009e2%2Fnull" />
+        <uws:result id="visibility-1" xlink:type="simple" xlink:href="cPeqkDzgAmWgghwpjBhegtrVGVBMOE%2Fweb%2Fad1c7b3c-f478-426e-81d0-cb6702d009e2%2Fobservations-12345-measurement_sets-visibility-2.fits" />
+    	<uws:result id="visibility-1.checksum" xlink:type="simple" xlink:href="cPeqkDzgAmWgghwpjBhegtrVGVBMOE%2Fweb%2Fad1c7b3c-f478-426e-81d0-cb6702d009e2%2Fobservations-12345-measurement_sets-visibility-2.fits.checksum" />
     </uws:results>
     <uws:errorSummary xsi:nil="true" />
 </uws:job>

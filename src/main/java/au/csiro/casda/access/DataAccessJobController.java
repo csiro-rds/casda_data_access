@@ -105,7 +105,7 @@ public class DataAccessJobController
         }
 
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequestUri().path("/{id}")
+        httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequestUri().path("/{id}/page/1")
                 .buildAndExpand(newJob.getRequestId()).toUri());
 
         return new ResponseEntity<List<String>>(Arrays.asList(newJob.getRequestId()), httpHeaders, HttpStatus.CREATED);

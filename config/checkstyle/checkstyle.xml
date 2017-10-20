@@ -126,7 +126,9 @@
 		<module name="EmptyStatement" />
 		<module name="EqualsHashCode" />
 		<module name="InnerAssignment" />
-		<module name="MagicNumber" />
+		<module name="MagicNumber" >
+			<property name="ignoreNumbers" value="-1, 0, 0.5, 1, 2, 3"/>
+		</module>
 		<module name="SimplifyBooleanReturn" />
 		<module name="MissingSwitchDefault" />
 

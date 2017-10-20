@@ -45,6 +45,8 @@ public class JobDto
 
     @NotNull
     private CasdaDownloadMode downloadMode;
+    
+    private String jobType;
 
     private String downloadFormat;
 
@@ -135,4 +137,13 @@ public class JobDto
         this.downloadFormat = downloadFormat;
     }
 
+	public String getJobType()
+	{
+		return jobType;
+	}
+
+	public void setJobType(String jobType) 
+	{
+		this.jobType = jobType;
+	}
 }

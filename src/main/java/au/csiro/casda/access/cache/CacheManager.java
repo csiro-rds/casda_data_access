@@ -11,13 +11,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-import javax.transaction.Transactional;
-
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.io.FileUtils;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.slf4j.Logger;
@@ -28,10 +29,12 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import au.csiro.casda.access.CutoutFileDescriptor;
+import au.csiro.casda.access.GeneratedFileDescriptor;
 import au.csiro.casda.access.DataAccessUtil;
 import au.csiro.casda.access.DownloadFile;
+import au.csiro.casda.access.EncapsulatedFileDescriptor;
 import au.csiro.casda.access.jpa.CachedFileRepository;
 import au.csiro.casda.access.jpa.DataAccessJobRepository;
 import au.csiro.casda.entity.dataaccess.CachedFile;
@@ -164,13 +167,14 @@ public class CacheManager implements CacheManagerInterface
     }
 
     @Override
-    public synchronized long reserveSpaceAndRegisterFilesForDownload(Collection<DownloadFile> files,
+    public synchronized Object[] reserveSpaceAndRegisterFilesForDownload(Collection<DownloadFile> files,
             DataAccessJob dataAccessJob) throws CacheException
     {
         List<CachedFile> filesToDownload = new ArrayList<>();
 
         long sizeCachedKb = 0L;
         Set<String> imageFileIdsAlreadyChecked = new HashSet<>();
+        Map<String, String> encapsulationAlreadyChecked = new HashMap<>();
 
         for (DownloadFile file : files)
         {
@@ -191,19 +195,20 @@ public class CacheManager implements CacheManagerInterface
              * if it's an image cutout, we need to download the original image to the cache if it isn't available on
              * disk. we only need to check each image file once.
              */
-            if (file.getFileType() == FileType.IMAGE_CUTOUT)
+            if (file.isGeneratedFileType())
             {
-                CutoutFileDescriptor cutoutFile = (CutoutFileDescriptor) file;
-                if (cutoutFile.getOriginalImageFilePath() == null
-                        && !imageFileIdsAlreadyChecked.contains(cutoutFile.getOriginalImageDownloadFile().getFileId()))
+                GeneratedFileDescriptor generatedFile = (GeneratedFileDescriptor) file;
+                if (generatedFile.getOriginalImageFilePath() == null && 
+                		!imageFileIdsAlreadyChecked.contains(generatedFile.getOriginalImageDownloadFile().getFileId()))
                 {
-                    imageFileIdsAlreadyChecked.add(cutoutFile.getOriginalImageDownloadFile().getFileId());
+                    imageFileIdsAlreadyChecked.add(generatedFile.getOriginalImageDownloadFile().getFileId());
                     CachedFile imageCachedFile =
-                            cachedFileRepository.findByFileId(cutoutFile.getOriginalImageDownloadFile().getFileId());
+                            cachedFileRepository.findByFileId(generatedFile.getOriginalImageDownloadFile().getFileId());
 
                     if (imageCachedFile == null)
                     {
-                        CachedFile newFile = createCachedFile(dataAccessJob, cutoutFile.getOriginalImageDownloadFile());
+                        CachedFile newFile = 
+                        		createCachedFile(dataAccessJob, generatedFile.getOriginalImageDownloadFile());
                         boolean alreadyListed = false;
                         for (CachedFile downloadFile : filesToDownload)
                         {
@@ -225,12 +230,55 @@ public class CacheManager implements CacheManagerInterface
                     }
                 }
             }
+            else if(file.isEncapsulatedType() && ((EncapsulatedFileDescriptor)file).getEncapsulationFile() != null)
+            {
+            	EncapsulatedFileDescriptor encapsulatedFile = (EncapsulatedFileDescriptor) file;
+                if (encapsulatedFile.getOriginalEncapsulationFilePath() == null)
+                {
+                    if (!encapsulationAlreadyChecked.keySet()
+                            .contains(encapsulatedFile.getEncapsulationFile().getFileId()))
+                    {
+                        CachedFile encapsulationCachedFile =
+                                cachedFileRepository.findByFileId(encapsulatedFile.getEncapsulationFile().getFileId());
+
+                        if (encapsulationCachedFile == null)
+                        {
+                            CachedFile newFile =
+                                    createCachedFile(dataAccessJob, encapsulatedFile.getEncapsulationFile());
+                            boolean alreadyListed = false;
+                            for (CachedFile downloadFile : filesToDownload)
+                            {
+                                if (downloadFile.getFileId().equals(newFile.getFileId()))
+                                {
+                                    alreadyListed = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyListed)
+                            {
+                                filesToDownload.add(newFile);
+                            }
+                            encapsulationCachedFile = newFile;
+                        }
+                        else
+                        {
+                            sizeCachedKb += encapsulationCachedFile.getSizeKb();
+                            resetCachedFileToDownloadIfFailedAndExtendExpiry(encapsulationCachedFile);
+                        }
+                        encapsulationAlreadyChecked.put(encapsulatedFile.getEncapsulationFile().getFileId(),
+                                encapsulationCachedFile.getPath());
+                    }
+                    encapsulatedFile.setOriginalEncapsulationFilePath(
+                            encapsulationAlreadyChecked.get(encapsulatedFile.getEncapsulationFile().getFileId()));
+                }
+
+            }
         }
 
         if (CollectionUtils.isEmpty(filesToDownload))
         {
             logger.debug("All files are in the cache");
-            return sizeCachedKb;
+            return new Object[] { sizeCachedKb, null };
         }
 
         long freeSpace = maxCacheSizeKb - getUsedCacheSizeKb();
@@ -257,20 +305,11 @@ public class CacheManager implements CacheManagerInterface
             if (cfo.getNumberOfElements() > 0)
             {
                 for (CachedFile cf : cfo.getContent())
-                {
-                    try
-                    {
-                        logger.debug("Removing file {} will release {}KB", cf.getFileId(), cf.getSizeKb());
-                        long size = cf.getSizeKb();
-                        this.removeCachedFile(cf.getPath());
-                        this.removeJobsUsingFile(cf);
-                        cachedFileRepository.delete(cf);
-                        freeSpace += size;
-                    }
-                    catch (IOException ioe)
-                    {
-                        throw new CacheException("Unable to remove file from cache: " + cf.getPath(), ioe);
-                    }
+                {              
+                    logger.debug("Removing file {} will release {}KB", cf.getFileId(), cf.getSizeKb());
+                    long size = cf.getSizeKb();
+                    clearCacheIfPossible(cf);
+                    freeSpace += size;
                 }
             }
             else
@@ -286,9 +325,9 @@ public class CacheManager implements CacheManagerInterface
         /* add all the new cached files */
         cachedFileRepository.save(filesToDownload);
 
-        return sizeCachedKb;
+        return new Object[] { sizeCachedKb, filesToDownload };
     }
-
+    
     private CachedFile createCachedFile(DataAccessJob dataAccessJob, DownloadFile file) throws CacheException
     {
         CachedFile newFile = new CachedFile();
@@ -296,7 +335,11 @@ public class CacheManager implements CacheManagerInterface
         newFile.setSizeKb(file.getSizeKb());
         newFile.setFileAvailableFlag(false);
         newFile.setFileType(file.getFileType());
-        if (file.getFileType() == FileType.CATALOGUE || file.getFileType() == FileType.IMAGE_CUTOUT)
+        newFile.setOriginalFilePath(file.getOriginalFilePath());
+        EnumSet<FileType> generatedFileTypes = EnumSet.of(
+        		FileType.CATALOGUE, FileType.IMAGE_CUTOUT, FileType.ERROR, FileType.GENERATED_SPECTRUM);
+
+        if (generatedFileTypes.contains(file.getFileType()))
         {
             String destination = new File(getJobDirectory(dataAccessJob), file.getFilename()).getAbsolutePath();
             newFile.setPath(destination);
@@ -310,12 +353,22 @@ public class CacheManager implements CacheManagerInterface
             newFile.setPath(destination);
         }
 
-        if (file.getFileType() == FileType.IMAGE_CUTOUT)
+        if (file.getFileType() == FileType.IMAGE_CUTOUT || file.getFileType() == FileType.GENERATED_SPECTRUM)
         {
-            CutoutFileDescriptor cutoutFileDescriptor = (CutoutFileDescriptor) file;
-            if (cutoutFileDescriptor.getOriginalImageFilePath() != null)
+            GeneratedFileDescriptor GeneratedFileDescriptor = (GeneratedFileDescriptor) file;
+            if (GeneratedFileDescriptor.getOriginalImageFilePath() != null)
             {
-                newFile.setOriginalFilePath(cutoutFileDescriptor.getOriginalImageFilePath());
+                newFile.setOriginalFilePath(GeneratedFileDescriptor.getOriginalImageFilePath());
+            }
+        }
+        
+        if (file.isEncapsulatedType() && 
+        		((EncapsulatedFileDescriptor)file).getEncapsulationFile() != null)
+        {
+        	EncapsulatedFileDescriptor encapsulatedFileDescriptor = (EncapsulatedFileDescriptor) file;
+            if (encapsulatedFileDescriptor.getOriginalEncapsulationFilePath() != null)
+            {
+                newFile.setOriginalFilePath(encapsulatedFileDescriptor.getOriginalEncapsulationFilePath());
             }
         }
 
@@ -361,7 +414,7 @@ public class CacheManager implements CacheManagerInterface
 
     private boolean isDirectoryEmpty(Path directory)
     {
-        if (Files.isDirectory(directory))
+        if (Files.exists(directory) && Files.isDirectory(directory))
         {
             try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(directory))
             {
@@ -472,9 +525,33 @@ public class CacheManager implements CacheManagerInterface
     }
     
     @Override
-    public void clearCacheIfPossible(CachedFile cachedFile)
+    public void clearCacheIfPossible(CachedFile cachedFile) throws CacheException
+    {        
+        try
+        {
+            this.removeCachedFile(cachedFile.getPath());
+            this.removeJobsUsingFile(cachedFile);
+            cachedFileRepository.delete(cachedFile);
+        }
+        catch (IOException ioe)
+        {
+            throw new CacheException("Unable to remove file from cache: " + cachedFile.getPath(), ioe);
+        }
+    }
+    
+    @Override
+    public void deleteAllCache() throws CacheException
     {
-        cachedFileRepository.delete(cachedFile);
+        cachedFileRepository.deleteAll();
+        try
+        {
+            FileUtils.cleanDirectory(jobsDir);
+            FileUtils.cleanDirectory(dataDir);
+        }
+        catch (IOException ioe)
+        {
+            throw new CacheException("Unable to clean cache directory.", ioe);
+        }        
     }
 
     @Override
@@ -596,7 +673,8 @@ public class CacheManager implements CacheManagerInterface
     public void createDataAccessJobDirectory(DataAccessJob job, Collection<DownloadFile> files)
             throws CacheException
     {
-        EnumSet<FileType> generatedFileTypes = EnumSet.of(FileType.CATALOGUE, FileType.IMAGE_CUTOUT);
+        EnumSet<FileType> generatedFileTypes = EnumSet.of(
+        		FileType.CATALOGUE, FileType.IMAGE_CUTOUT, FileType.ERROR, FileType.GENERATED_SPECTRUM);
 
         for (DownloadFile requiredFile : files)
         {

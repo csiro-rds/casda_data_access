@@ -32,6 +32,7 @@ import org.apache.logging.log4j.core.Layout;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.hamcrest.Matcher;
 import org.mockito.ArgumentMatcher;
@@ -54,7 +55,12 @@ public final class Log4JTestAppender implements Appender
         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
         Configuration config = ctx.getConfiguration();
         Log4JTestAppender appender = new Log4JTestAppender();
-        config.getLoggerConfig("au.csiro").addAppender(appender, Level.INFO, null);
+        LoggerConfig loggerConfig = config.getLoggerConfig("au.csiro");
+        for(String key : loggerConfig.getAppenders().keySet())
+        {
+            loggerConfig.removeAppender(key);
+        }
+        loggerConfig.addAppender(appender, Level.INFO, null);
         return appender;
     }
 
@@ -143,7 +149,7 @@ public final class Log4JTestAppender implements Appender
      *            the Level of the LogEvent
      * @param messageFragment
      *            a fragment of the message in the LogEvent
-     * @param exception
+     * @param throwable
      *            the Exception associated with the LogEvent
      */
     public void verifyLogMessage(Level level, String messageFragment, Throwable throwable)
@@ -159,7 +165,7 @@ public final class Log4JTestAppender implements Appender
      *            the Level of the LogEvent
      * @param messageMatcher
      *            a matcher used to match the LogEvent's message
-     * @param exception
+     * @param throwable
      *            the Exception associated with the LogEvent
      */
     public void verifyLogMessage(Level level, Matcher<String> messageMatcher, Throwable throwable)
@@ -259,4 +265,15 @@ public final class Log4JTestAppender implements Appender
     {
         assertThat(this.events, empty());
     }
+
+	@Override
+	public State getState() 
+	{
+		return null;
+	}
+
+	@Override
+	public void initialize() 
+	{
+	}
 }

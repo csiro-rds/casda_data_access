@@ -46,6 +46,10 @@ fieldset {
 }
 
 .preparing {
+	background: #ffff00;
+}
+
+.queued {
 	background: #CCCCCC;
 }
 
@@ -274,12 +278,15 @@ and (max-width : 550px) {
 	width: 285px;
 }
 
-.downloadLink
-{
-	float: right;
+.downloadLink {
+	float: left;
 	margin-top: -20px;
 	margin-bottom: 10px;
 	font-style: italic;
-	font-size:14px;
+	font-size:18px;
 }
 
+ul.disc li {
+	list-style-type: disc;
+	margin-left: 20px;
+}

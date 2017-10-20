@@ -21,6 +21,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.context.annotation.Scope;
 import org.springframework.context.annotation.ScopedProxyMode;
@@ -46,14 +48,34 @@ import org.springframework.web.client.RestTemplate;
 @Scope(value = ConfigurableBeanFactory.SCOPE_PROTOTYPE, proxyMode = ScopedProxyMode.TARGET_CLASS)
 public class SecuredRestTemplate extends RestTemplate
 {
+    /**
+     * Default rest connection timeout in milliseconds currently 2 min
+     */
+    public static final int DEFAULT_RESTTEMPLATE_CONNECT_TIMEOUT = 120000;
+    
     private HttpComponentsClientHttpRequestFactory requestFactory;
-
+    
     /**
      * Default Constructor
-     */    
-    public SecuredRestTemplate()
+     * @param connectionTimeout the time limit for rest connections
+     */
+    @Autowired
+    public SecuredRestTemplate(@Value("${connection.timeout.limit: " 
+    		+ DEFAULT_RESTTEMPLATE_CONNECT_TIMEOUT + "}") Integer connectionTimeout)
     {
         this("", "", true);
+        int restConnectionTimeout;
+        try
+        {
+            restConnectionTimeout = connectionTimeout != null && connectionTimeout > -1 
+            		? connectionTimeout:DEFAULT_RESTTEMPLATE_CONNECT_TIMEOUT;
+        }
+        catch(Exception e)
+        {
+            restConnectionTimeout = DEFAULT_RESTTEMPLATE_CONNECT_TIMEOUT;
+        }
+
+        requestFactory.setConnectTimeout(restConnectionTimeout);
     }
 
     /**

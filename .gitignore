@@ -6,6 +6,8 @@
 .gradle/
 .springBeans
 packager.jar
+application-casda_data_access.properties
 uwsDir/
 /*.checksum
 /*.fits
+src/main/resources/rebel.xml

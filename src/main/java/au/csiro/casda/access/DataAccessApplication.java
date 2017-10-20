@@ -25,6 +25,7 @@ package au.csiro.casda.access;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
@@ -45,19 +46,22 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import au.csiro.casda.Utils;
 import au.csiro.casda.access.jpa.CachedFileRepository;
 import au.csiro.casda.access.uws.AccessUwsFactory;
+import au.csiro.casda.deposit.jobqueue.QueuedJobManager;
 import au.csiro.casda.jobmanager.AsynchronousJobManager;
 import au.csiro.casda.jobmanager.CommandRunnerServiceProcessJobFactory;
 import au.csiro.casda.jobmanager.JavaProcessJobFactory;
 import au.csiro.casda.jobmanager.JobManager;
-import au.csiro.casda.jobmanager.JobManagerThrottle;
 import au.csiro.casda.jobmanager.ProcessJobBuilder.ProcessJobFactory;
 import au.csiro.casda.jobmanager.SlurmJobManager;
 import au.csiro.casda.logging.CasdaLoggingSettings;
+import au.csiro.spring.notification.MailService;
+import freemarker.template.TemplateExceptionHandler;
 import uws.UWSException;
 import uws.service.UWSFactory;
 import uws.service.file.LocalUWSFileManager;
@@ -200,7 +204,7 @@ public class DataAccessApplication extends SpringBootServletInitializer
     @Scope(ConfigurableBeanFactory.SCOPE_SINGLETON)
     public JobManager jobManager()
     {
-        return new JobManagerThrottle(getUnthrottledJobManager(), this.jobManagerThrottlingMap);
+        return new QueuedJobManager(getUnthrottledJobManager(), this.jobManagerThrottlingMap);
     }
 
     /**
@@ -299,5 +303,34 @@ public class DataAccessApplication extends SpringBootServletInitializer
     public UWSFileManager getUwsFileManager(@Value("${uws.directory}") String uwsDirectoryName) throws UWSException
     {
         return new LocalUWSFileManager(new File(uwsDirectoryName), false, false);
+    }
+    
+    /**
+     * Creates and populates the MailService bean
+     * @param templates the path where the freemarker templates are stored
+     * @param safeAddress the emailaddress which will override the 'to address' in non-prod environments
+     * @param host the smtp server
+     * @param port the port for accessing the smtp server
+     * @return the MailService
+     */
+    @Bean
+    public MailService getMailService(@Value("${freemarker.template.path}") String templates, 
+    								  @Value("${email.safe.address}") String safeAddress,
+    								  @Value("${email.host}") String host,
+    								  @Value("${email.port}") int port)
+    {
+    	//freemarker configuration
+    	freemarker.template.Configuration config = new freemarker.template.Configuration();
+    	config.setClassForTemplateLoading(Utils.class, templates);
+    	config.setDefaultEncoding("UTF-8");
+    	config.setLocale(Locale.ENGLISH);
+    	config.setTemplateExceptionHandler(TemplateExceptionHandler.RETHROW_HANDLER);
+    	
+    	//Mail sender configuration
+    	JavaMailSenderImpl sender = new JavaMailSenderImpl();
+    	sender.setHost(host);
+    	sender.setPort(port);
+    	
+    	return new MailService(sender, config, safeAddress);
     }
 }

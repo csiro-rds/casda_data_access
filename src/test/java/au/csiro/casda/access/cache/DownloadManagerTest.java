@@ -1,5 +1,20 @@
 package au.csiro.casda.access.cache;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 /*
  * #%L
  * CSIRO ASKAP Science Data Archive
@@ -18,39 +33,33 @@ import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.sameInstance;
 import static org.hamcrest.Matchers.startsWith;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.io.File;
 
 import org.apache.logging.log4j.Level;
-import org.joda.time.DateTime;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.data.domain.Page;
 
 import au.csiro.casda.access.Log4JTestAppender;
 import au.csiro.casda.access.jpa.CachedFileRepository;
+import au.csiro.casda.access.jpa.CubeletRepository;
+import au.csiro.casda.access.jpa.GeneratedSpectrumRepository;
 import au.csiro.casda.access.jpa.ImageCutoutRepository;
+import au.csiro.casda.access.jpa.MomentMapRepository;
+import au.csiro.casda.access.jpa.SpectrumRepository;
+import au.csiro.casda.access.jpa.ThumbnailRepository;
+import au.csiro.casda.access.services.InlineScriptService;
 import au.csiro.casda.entity.dataaccess.CachedFile;
+import au.csiro.casda.entity.dataaccess.CachedFile.FileType;
 import au.csiro.casda.entity.dataaccess.ImageCutout;
+import au.csiro.casda.entity.observation.Cubelet;
+import au.csiro.casda.entity.observation.MomentMap;
+import au.csiro.casda.entity.observation.Spectrum;
 import au.csiro.casda.jobmanager.JavaProcessJobFactory;
 import au.csiro.casda.jobmanager.JobManager;
 import au.csiro.casda.jobmanager.JobManager.Job;
@@ -73,8 +82,26 @@ public class DownloadManagerTest
     private CachedFileRepository cachedFileRepository;
 
     @Mock
-    ImageCutoutRepository imageCutoutRepository;
+    private ImageCutoutRepository imageCutoutRepository;
 
+    @Mock
+    private GeneratedSpectrumRepository generatedSpectrumRepository;
+
+    @Mock
+    private SpectrumRepository spectrumRepository;
+
+    @Mock
+    private MomentMapRepository momentMapRepository;
+
+    @Mock
+    private CubeletRepository cubeletRepository;
+
+    @Mock
+    private ThumbnailRepository thumbnailRepository;
+
+    @Mock
+    private InlineScriptService inlineScriptService;
+    
     @Mock
     private JobStatus mockSuccess;
     @Mock
@@ -86,6 +113,9 @@ public class DownloadManagerTest
 
     private Log4JTestAppender testAppender;
 
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
+
     private static final int MAX_DOWNLOAD_ATTEMPTS = 3;
 
     @Before
@@ -94,14 +124,22 @@ public class DownloadManagerTest
         MockitoAnnotations.initMocks(this);
         testAppender = Log4JTestAppender.createAppender();
         JavaProcessJobFactory processJobFactory = new JavaProcessJobFactory();
+        
         String downloadCommandAndArgs =
                 "{ " + "\"download\", " + "\"fileId=<fileId>\", " + "\"destination=<destination>\" }";
         String cutoutCommandAndArgs = "{ \"cmd\", \"arg1\", \"<source_file>\", \"<dest_file>\", \"-D3\", "
                 + "\"<dim3_range>\", \"-D4\", \"<dim4_range>\", \"<ra>\", \"<dec>\", \"<xsize>\", \"<ysize>\" }";
-        downloadManager = spy(new DownloadManager(cachedFileRepository, imageCutoutRepository, jobManager,
-                "depositToolsWorkingDirectory", MAX_DOWNLOAD_ATTEMPTS, mock(CasdaToolProcessJobBuilderFactory.class),
-                DownloadManager.ProcessJobType.SIMPLE.toString(), downloadCommandAndArgs, null, cutoutCommandAndArgs,
-                processJobFactory));
+        String pngCutoutCommandAndArgs = "{ \"cmd\", \"arg1\", \"<source_file>\", \"<dest_file>\", \"-D3\", "
+                + "\"<dim3_range>\", \"-D4\", \"<dim4_range>\", \"<ra>\", \"<dec>\", \"<xsize>\", \"<ysize>\" }";
+        String generateSpectrumCommand = "{ \"cmd\", \"arg1\", \"<source_file>\", \"<dest_file>\", \"-D3\", " 
+        		+ "\"<dim3_range>\", \"-D4\", \"<dim4_range>\", \"<ra>\", \"<dec>\", \"<xsize>\", \"<ysize>\" }";
+        String encapCommandAndArgs = "{ \"unencapsulate\", \"<tarFileName>\"}";
+        downloadManager = spy(new DownloadManager(cachedFileRepository, imageCutoutRepository,
+                generatedSpectrumRepository, spectrumRepository, momentMapRepository, cubeletRepository,
+                thumbnailRepository, jobManager, "depositToolsWorkingDirectory", MAX_DOWNLOAD_ATTEMPTS,
+                mock(CasdaToolProcessJobBuilderFactory.class), DownloadManager.ProcessJobType.SIMPLE.toString(),
+                downloadCommandAndArgs, null, cutoutCommandAndArgs, pngCutoutCommandAndArgs, generateSpectrumCommand,
+                encapCommandAndArgs, processJobFactory, inlineScriptService, ""));
 
         when(mockSuccess.isFailed()).thenReturn(false);
         when(mockSuccess.isFinished()).thenReturn(true);
@@ -115,56 +153,8 @@ public class DownloadManagerTest
         when(mockRunning.isFinished()).thenReturn(false);
     }
 
-    @SuppressWarnings("unchecked")
     @Test
-    public void testPollJobManagerNoFilesDownloading()
-    {
-        Page<CachedFile> downloadingFiles = mock(Page.class);
-        doReturn(false).when(downloadingFiles).hasContent();
-        doReturn(downloadingFiles).when(cachedFileRepository).findDownloadingCachedFiles(eq(MAX_DOWNLOAD_ATTEMPTS),
-                any());
-
-        downloadManager.pollJobManagerForDownloadJobs();
-
-        verify(jobManager, never()).getJobStatus(anyString());
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    public void testPollJobManagerPaging()
-    {
-        Page<CachedFile> downloadingFiles = mock(Page.class);
-        doReturn(true).doReturn(true).doReturn(false).when(downloadingFiles).hasContent();
-        doReturn(true).doReturn(false).when(downloadingFiles).hasNext();
-
-        List<CachedFile> cachedPage1 = new ArrayList<>();
-        CachedFile cachedFile1 = new CachedFile("file1", "", 14L, DateTime.now());
-        CachedFile cachedFile2 = new CachedFile("file2", "", 15L, DateTime.now());
-        cachedPage1.add(cachedFile1);
-        cachedPage1.add(cachedFile2);
-        List<CachedFile> cachedPage2 = new ArrayList<>();
-        CachedFile cachedFile3 = new CachedFile("file3", "", 16L, DateTime.now());
-        CachedFile cachedFile4 = new CachedFile("file4", "", 17L, DateTime.now());
-        cachedPage2.add(cachedFile3);
-        cachedPage2.add(cachedFile4);
-
-        doReturn(cachedPage1).doReturn(cachedPage2).doReturn(null).when(downloadingFiles).getContent();
-
-        doReturn(downloadingFiles).when(cachedFileRepository).findDownloadingCachedFiles(eq(MAX_DOWNLOAD_ATTEMPTS),
-                any());
-        doNothing().when(downloadManager).pollJobManagerForDownloadJob(any());
-
-        downloadManager.pollJobManagerForDownloadJobs();
-
-        verify(downloadManager, times(4)).pollJobManagerForDownloadJob(any());
-        verify(downloadManager).pollJobManagerForDownloadJob(eq(cachedFile1));
-        verify(downloadManager).pollJobManagerForDownloadJob(eq(cachedFile2));
-        verify(downloadManager).pollJobManagerForDownloadJob(eq(cachedFile3));
-        verify(downloadManager).pollJobManagerForDownloadJob(eq(cachedFile4));
-    }
-
-    @Test
-    public void testPollJobManagerNewFileStartsJob()
+    public void testPollJobManagerNewFileStartsJob() throws CacheException
     {
         CachedFile newFile = new CachedFile();
         newFile.setFileId("file-id-1");
@@ -191,7 +181,71 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerNewFileStartFailsIncrementsDownloadRetries()
+    public void testPollJobManagerNewEncapsulatedFileStartsJob() throws CacheException
+    {
+        CachedFile newFile = new CachedFile();
+        newFile.setFileId("observations-333436-moment_maps-mom1_2.fits");
+        newFile.setPath("/ASKAP/access/dev/vol001/cache/data/2016-12-05/observations-333436-moment_maps-mom1_2.fits");
+        newFile.setOriginalFilePath(
+                "ASKAPArchive/2016-11-29/1/observations-333436-encapsulation_files-encaps-mom-7.tar");
+        newFile.setFileType(FileType.MOMENT_MAP);
+        when(jobManager.getJobStatus(anyString())).thenReturn(mockRunning);
+        when(jobManager.getJobStatus("")).thenReturn(null);
+
+        downloadManager.pollJobManagerForDownloadJob(newFile);
+
+        ArgumentCaptor<ProcessJob> processJobCaptor = ArgumentCaptor.forClass(ProcessJob.class);
+        verify(jobManager, times(1)).startJob(processJobCaptor.capture());
+
+        // verify that the new file was started to download
+        assertEquals(0, newFile.getDownloadJobRetryCount());
+        assertThat(newFile.getDownloadJobId(), startsWith("DataAccess-observations-333436-moment_maps-mom1_2.fits-"));
+        assertThat(newFile.getDownloadJobId(), endsWith("-0"));
+
+        ProcessJob processJob = processJobCaptor.getValue();
+        assertEquals("unencapsulate", processJob.getCommandAndArgs()[0]);
+        assertEquals("ASKAPArchive/2016-11-29/1/observations-333436-encapsulation_files-encaps-mom-7.tar",
+                processJob.getCommandAndArgs()[1]);
+        assertEquals("mom1_2.fits", processJob.getCommandAndArgs()[2]);
+        assertEquals("observations-333436-moment_maps-mom1_2.fits", processJob.getCommandAndArgs()[3]);
+        assertEquals(newFile.getDownloadJobId(), processJob.getId());
+        verify(cachedFileRepository).save(newFile);
+    }
+
+    @Test
+    public void testPollJobManagerNewUnencapsulatedFileStartsJob() throws CacheException
+    {
+        CachedFile newFile = new CachedFile();
+        newFile.setFileId("observations-333436-moment_maps-mom1_2.fits");
+        newFile.setPath("/ASKAP/access/dev/vol001/cache/data/2016-12-05/observations-333436-moment_maps-mom1_2.fits");
+        newFile.setOriginalFilePath(
+                "ASKAPArchive/2016-11-29/1/observations-333436-moment_maps-mom1_2.fits");
+        newFile.setFileType(FileType.MOMENT_MAP);
+        when(jobManager.getJobStatus(anyString())).thenReturn(mockRunning);
+        when(jobManager.getJobStatus("")).thenReturn(null);
+
+        downloadManager.pollJobManagerForDownloadJob(newFile);
+
+        ArgumentCaptor<ProcessJob> processJobCaptor = ArgumentCaptor.forClass(ProcessJob.class);
+        verify(jobManager, times(1)).startJob(processJobCaptor.capture());
+
+        // verify that the new file was started to download
+        assertEquals(0, newFile.getDownloadJobRetryCount());
+        assertThat(newFile.getDownloadJobId(), startsWith("DataAccess-observations-333436-moment_maps-mom1_2.fits-"));
+        assertThat(newFile.getDownloadJobId(), endsWith("-0"));
+
+        ProcessJob processJob = processJobCaptor.getValue();
+        assertEquals("download", processJob.getCommandAndArgs()[0]);
+        assertEquals("fileId=observations-333436-moment_maps-mom1_2.fits", processJob.getCommandAndArgs()[1]);
+        assertEquals(
+                "destination=/ASKAP/access/dev/vol001/cache/data/2016-12-05/observations-333436-moment_maps-mom1_2.fits",
+                processJob.getCommandAndArgs()[2]);
+        assertEquals(newFile.getDownloadJobId(), processJob.getId());
+        verify(cachedFileRepository).save(newFile);
+    }
+
+    @Test
+    public void testPollJobManagerNewFileStartFailsIncrementsDownloadRetries() throws CacheException
     {
         CachedFile newFile = new CachedFile();
         newFile.setFileId("file-id-1");
@@ -219,7 +273,7 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerNewFileThrottled()
+    public void testPollJobManagerNewFileThrottled() throws CacheException
     {
         CachedFile newFile = new CachedFile();
         newFile.setFileId("file-id-1");
@@ -248,7 +302,7 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerCurrentlyDownloadingFileDoesNothing()
+    public void testPollJobManagerCurrentlyDownloadingFileDoesNothing() throws CacheException
     {
 
         CachedFile downloadingFile = new CachedFile();
@@ -269,7 +323,29 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerCompletedFileUpdatesCache()
+    public void testPollJobManagerCurrentlyDownloadingEncapsFileDoesNothing() throws CacheException
+    {
+
+        CachedFile downloadingFile = new CachedFile();
+        downloadingFile.setFileId("file-id-2");
+        downloadingFile.setPath("dest/file-id-2");
+        downloadingFile.setOriginalFilePath("dest/encaps-spectrum-1.tar");
+        downloadingFile.setDownloadJobId("running-job-id");
+        downloadingFile.setDownloadJobRetryCount(1);
+
+        doReturn(mockRunning).when(jobManager).getJobStatus("running-job-id");
+
+        downloadManager.pollJobManagerForDownloadJob(downloadingFile);
+
+        verify(jobManager, never()).startJob(any());
+
+        // verify that the running file is skipped
+        assertEquals(1, downloadingFile.getDownloadJobRetryCount());
+        verify(cachedFileRepository, never()).save(downloadingFile);
+    }
+
+    @Test
+    public void testPollJobManagerCompletedFileUpdatesCache() throws Exception
     {
         CachedFile completedFile = new CachedFile();
         completedFile.setFileId("test.txt");
@@ -282,6 +358,8 @@ public class DownloadManagerTest
         downloadManager.pollJobManagerForDownloadJob(completedFile);
 
         verify(jobManager, never()).startJob(any());
+        verify(inlineScriptService, never()).callScriptInline(anyString(), anyString());
+
 
         // verify that the completed job is updated
         assertTrue(completedFile.isFileAvailableFlag());
@@ -290,7 +368,7 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerFailedFileRestartsDownload()
+    public void testPollJobManagerFailedFileRestartsDownload() throws CacheException
     {
         CachedFile failedFile = new CachedFile();
         failedFile.setFileId("file-id-3");
@@ -326,7 +404,7 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerNoMoreAttemptsAllowedUpdatesCacheAndDoesntRestart()
+    public void testPollJobManagerNoMoreAttemptsAllowedUpdatesCacheAndDoesntRestart() throws CacheException
     {
 
         CachedFile noMoreAttemptsFile = new CachedFile();
@@ -337,13 +415,21 @@ public class DownloadManagerTest
 
         doReturn(mockFailed).when(jobManager).getJobStatus("no-more-attempts-job-id");
 
-        downloadManager.pollJobManagerForDownloadJob(noMoreAttemptsFile);
+        try
+        {
+            downloadManager.pollJobManagerForDownloadJob(noMoreAttemptsFile);
+            fail("Expected the call to to fail");
+        }
+        catch (CacheException ce)
+        {
+            assertThat(ce.getMessage(), is("File file-id-3a could not be retrieved."));
+        }
 
         verify(jobManager, never()).startJob(any());
 
         // verify that the no more attempts left is updated
         assertEquals(MAX_DOWNLOAD_ATTEMPTS + 1, noMoreAttemptsFile.getDownloadJobRetryCount());
-        verify(cachedFileRepository, times(2)).save(noMoreAttemptsFile);
+        verify(cachedFileRepository, times(1)).save(noMoreAttemptsFile);
 
         testAppender
                 .verifyLogMessage(Level.ERROR,
@@ -357,7 +443,7 @@ public class DownloadManagerTest
     }
 
     @Test
-    public void testPollJobManagerJobCompleteButFileMissingRestartsDownload()
+    public void testPollJobManagerJobCompleteButFileMissingRestartsDownload() throws CacheException
     {
 
         CachedFile missingFile = new CachedFile();
@@ -391,6 +477,7 @@ public class DownloadManagerTest
     {
         String jobId = "bruce";
         CachedFile downloadingFile = new CachedFile();
+        downloadingFile.setFileType(FileType.IMAGE_CUTOUT);
         downloadingFile.setFileId("cutout-4-image-99");
         String destPath = "dest/cutout-4";
         downloadingFile.setPath(destPath);
@@ -401,7 +488,7 @@ public class DownloadManagerTest
         imageCutout.setBounds("12.0 -34.0 5 5");
         when(imageCutoutRepository.findOne(4L)).thenReturn(imageCutout);
 
-        ProcessJob cutoutJob = downloadManager.buildCutoutJob(jobId, downloadingFile);
+        ProcessJob cutoutJob = downloadManager.buildImageCutoutJob(jobId, downloadingFile);
         assertThat(cutoutJob.getId(), is(jobId));
         assertThat(cutoutJob.getCommandAndArgs(),
                 is(new String[] { "cmd", "arg1", sourcePath, destPath, "12.0", "-34.0", "5", "5" }));
@@ -412,6 +499,7 @@ public class DownloadManagerTest
     {
         String jobId = "bruce";
         CachedFile downloadingFile = new CachedFile();
+        downloadingFile.setFileType(FileType.IMAGE_CUTOUT);
         downloadingFile.setFileId("cutout-4-image-99");
         String destPath = "dest/cutout-4";
         downloadingFile.setPath(destPath);
@@ -422,7 +510,7 @@ public class DownloadManagerTest
         imageCutout.setBounds("12.0 -34.5 6.0 6.0 D null null N 1");
         when(imageCutoutRepository.findOne(4L)).thenReturn(imageCutout);
 
-        ProcessJob cutoutJob = downloadManager.buildCutoutJob(jobId, downloadingFile);
+        ProcessJob cutoutJob = downloadManager.buildImageCutoutJob(jobId, downloadingFile);
         assertThat(cutoutJob.getId(), is(jobId));
         assertThat(cutoutJob.getCommandAndArgs(),
                 is(new String[] { "cmd", "arg1", sourcePath, destPath, "12.0", "-34.5", "6.0", "6.0" }));
@@ -433,6 +521,7 @@ public class DownloadManagerTest
     {
         String jobId = "bruce";
         CachedFile downloadingFile = new CachedFile();
+        downloadingFile.setFileType(FileType.IMAGE_CUTOUT);
         downloadingFile.setFileId("cutout-4-image-99");
         String destPath = "dest/cutout-4";
         downloadingFile.setPath(destPath);
@@ -443,7 +532,7 @@ public class DownloadManagerTest
         imageCutout.setBounds("12.0 -34.0 5 5 D 1:3");
         when(imageCutoutRepository.findOne(4L)).thenReturn(imageCutout);
 
-        ProcessJob cutoutJob = downloadManager.buildCutoutJob(jobId, downloadingFile);
+        ProcessJob cutoutJob = downloadManager.buildImageCutoutJob(jobId, downloadingFile);
         assertThat(cutoutJob.getId(), is(jobId));
         assertThat(cutoutJob.getCommandAndArgs(),
                 is(new String[] { "cmd", "arg1", sourcePath, destPath, "-D3", "1:3", "12.0", "-34.0", "5", "5" }));
@@ -454,6 +543,7 @@ public class DownloadManagerTest
     {
         String jobId = "bruce";
         CachedFile downloadingFile = new CachedFile();
+        downloadingFile.setFileType(FileType.IMAGE_CUTOUT);
         downloadingFile.setFileId("cutout-4-image-99");
         String destPath = "dest/cutout-4";
         downloadingFile.setPath(destPath);
@@ -464,9 +554,75 @@ public class DownloadManagerTest
         imageCutout.setBounds("12.0 -34.0 5 5 D 1:3 2");
         when(imageCutoutRepository.findOne(4L)).thenReturn(imageCutout);
 
-        ProcessJob cutoutJob = downloadManager.buildCutoutJob(jobId, downloadingFile);
+        ProcessJob cutoutJob = downloadManager.buildImageCutoutJob(jobId, downloadingFile);
         assertThat(cutoutJob.getId(), is(jobId));
         assertThat(cutoutJob.getCommandAndArgs(), is(new String[] { "cmd", "arg1", sourcePath, destPath, "-D3", "1:3",
                 "-D4", "2", "12.0", "-34.0", "5", "5" }));
+    }
+    
+    @Test
+    public void testgetFileNameInArchive()
+    {
+        CachedFile testFile = new CachedFile();
+        testFile.setFileId("observations-333436-spectra-spec_1.fits");
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("spec_1.fits"));
+        testFile.setFileId("observations-333436-moment_map-mom0_3.fits");
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("mom0_3.fits"));
+        testFile.setFileId("tribble.fits");
+        assertThat(downloadManager.getFileNameInArchive(testFile), is(""));
+        
+        Spectrum spectrum = new Spectrum();
+        spectrum.setFilename("spec_1.fits");
+        when(spectrumRepository.findOne(1019L)).thenReturn(spectrum);
+        testFile.setFileId("observations-333436-spectra-1019.fits");
+        testFile.setFileType(FileType.SPECTRUM);
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("spec_1.fits"));
+
+        testFile.setFileId("level7-1741-spectra-1019.fits");
+        testFile.setFileType(FileType.SPECTRUM);
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("spec_1.fits"));
+        
+        MomentMap momentMap = new MomentMap();
+        momentMap.setFilename("mom0_3.fits");
+        when(momentMapRepository.findOne(4200L)).thenReturn(momentMap);
+        testFile.setFileType(FileType.MOMENT_MAP);
+        testFile.setFileId("observations-333436-moment_map-4200.fits");
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("mom0_3.fits"));
+
+        testFile.setFileId("level7-1741-moment_map-4200.fits");
+        testFile.setFileType(FileType.MOMENT_MAP);
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("mom0_3.fits"));
+        
+        Cubelet cubelet = new Cubelet();
+        cubelet.setFilename("cube_123.fits");
+        when(cubeletRepository.findOne(1234L)).thenReturn(cubelet);
+        testFile.setFileType(FileType.CUBELET);
+        testFile.setFileId("observations-333436-cubelet-1234.fits");
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("cube_123.fits"));
+
+        testFile.setFileId("level7-1741-cubelet-1234.fits");
+        testFile.setFileType(FileType.CUBELET);
+        assertThat(downloadManager.getFileNameInArchive(testFile), is("cube_123.fits"));
+    }
+    
+    @Test
+    public void testCutoutJobBuildsChecksum() throws Exception
+    {
+        File testFile = tempFolder.newFile("test.txt");
+        CachedFile completedFile = new CachedFile();
+        completedFile.setFileId(testFile.getName());
+        completedFile.setPath(testFile.getPath());
+        completedFile.setDownloadJobId("completed-job-id");
+        completedFile.setDownloadJobRetryCount(2);
+        completedFile.setFileType(FileType.IMAGE_CUTOUT);
+        String path = testFile.getCanonicalPath();
+        when(inlineScriptService.callScriptInline("", path)).thenReturn("a b c");
+
+        doReturn(mockSuccess).when(jobManager).getJobStatus("completed-job-id");
+
+        downloadManager.pollJobManagerForDownloadJob(completedFile);
+
+        verify(jobManager, never()).startJob(any());
+        verify(inlineScriptService).callScriptInline(anyString(), anyString());
     }
 }

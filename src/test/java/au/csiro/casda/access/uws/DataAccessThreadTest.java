@@ -76,8 +76,8 @@ public class DataAccessThreadTest
     @Parameters
     public static Collection<Object[]> data()
     {
-        return Arrays.asList(new Object[][] { { CasdaDownloadMode.WEB }, { CasdaDownloadMode.SIAP_SYNC },
-                { CasdaDownloadMode.SIAP_ASYNC } });
+        return Arrays.asList(new Object[][] { { CasdaDownloadMode.WEB }, { CasdaDownloadMode.SODA_SYNC_WEB },
+                { CasdaDownloadMode.SODA_ASYNC_PAWSEY } });
     }
 
     private int hoursToExpiryForDownloadMode;
@@ -93,7 +93,7 @@ public class DataAccessThreadTest
         this.casdaDownloadMode = (CasdaDownloadMode) casdaDownloadMode;
         hoursToExpirySync = RandomUtils.nextInt(1, 10);
         hoursToExpiryDefault = RandomUtils.nextInt(11, 20);
-        if (CasdaDownloadMode.SIAP_SYNC == this.casdaDownloadMode)
+        if (CasdaDownloadMode.SODA_SYNC_WEB == this.casdaDownloadMode)
         {
             this.hoursToExpiryForDownloadMode = this.hoursToExpirySync;
         }
@@ -134,10 +134,11 @@ public class DataAccessThreadTest
     {
         DataAccessJob dataAccessJob = new DataAccessJob();
         dataAccessJob.setDownloadMode(this.casdaDownloadMode);
-        dataAccessJob.addImageCube(new ImageCube());
         String requestId = "42abc-123";
+        dataAccessJob.setRequestId(requestId);
         DateTime expiryDate = DateTime.now(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
         stub(dataAccessService.getExistingJob(requestId)).toReturn(dataAccessJob);
+        stub(dataAccessService.getFileCount(requestId)).toReturn(1L);
 
         Result packagerResult = new Result(expiryDate, 1201000L, 5000000L);
         doReturn(packagerResult).when(packager).pack(Mockito.eq(dataAccessJob), Mockito.any(Integer.class));
@@ -146,7 +147,7 @@ public class DataAccessThreadTest
         params.set(AccessJobManager.REQUEST_ID, requestId);
         UWSJob uwsJob = new CasdaUwsJob(params);
         DataAccessThread dataAccessThread =
-                new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+                new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync, "");
 
         dataAccessThread.jobWork();
 
@@ -160,7 +161,7 @@ public class DataAccessThreadTest
         assertThat(commenceMessage, containsString(requestId));
 
         String completeLogMessage = CasdaDataAccessEvents.E039.messageBuilder().add(requestId).add(5000000L)
-                .add(3799000).add(1201000L).toString();
+                .add(3799000).add(1201000L).add(this.casdaDownloadMode.name()).add("File").toString();
         testAppender.verifyLogMessage(Level.INFO, completeLogMessage);
         assertThat(completeLogMessage, containsString("[E039] "));
         assertThat(completeLogMessage, containsString(requestId));
@@ -185,8 +186,8 @@ public class DataAccessThreadTest
             UWSJob uwsJob = new CasdaUwsJob(params);
 
             approximateErrorDateTime = new DateTime(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
             fail("jobWork should have failed with a wrapped CacheFullException"); // exception is expected
         }
@@ -235,8 +236,8 @@ public class DataAccessThreadTest
             UWSJob uwsJob = new CasdaUwsJob(params);
 
             approximateErrorDateTime = new DateTime(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
             fail("jobWork should have failed with a wrapped CacheException"); // exception is expected
         }
@@ -286,8 +287,8 @@ public class DataAccessThreadTest
             UWSJob uwsJob = new CasdaUwsJob(params);
 
             approximateErrorDateTime = new DateTime(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
             fail("jobWork should have failed with a wrapped CatalogueRetrievalException"); // exception is expected
         }
@@ -338,8 +339,8 @@ public class DataAccessThreadTest
             UWSJob uwsJob = new CasdaUwsJob(params);
 
             approximateErrorDateTime = new DateTime(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
             fail("jobWork should have failed with a wrapped CatalogueRetrievalException"); // exception is expected
         }
@@ -381,8 +382,8 @@ public class DataAccessThreadTest
             params.set(AccessJobManager.REQUEST_ID, requestId);
             UWSJob uwsJob = new CasdaUwsJob(params);
 
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
             fail("jobWork should have failed with a wrapped IllegalArgumentException"); // exception is expected
         }
@@ -407,7 +408,7 @@ public class DataAccessThreadTest
     @Test
     public void testNoDataProductsForAsyncMarkedAsError() throws Exception
     {
-        if (this.casdaDownloadMode != CasdaDownloadMode.SIAP_ASYNC)
+        if (this.casdaDownloadMode != CasdaDownloadMode.SODA_ASYNC_WEB)
         {
             return;
         }
@@ -425,8 +426,8 @@ public class DataAccessThreadTest
             UWSJob uwsJob = new CasdaUwsJob(params);
 
             approximateErrorDateTime = new DateTime(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
             fail("jobWork should have failed with a wrapped IllegalStateException"); // exception is expected
         }
@@ -459,7 +460,7 @@ public class DataAccessThreadTest
     @Test
     public void testNoCutoutsForAsyncMarkedAsError() throws Exception
     {
-        if (this.casdaDownloadMode != CasdaDownloadMode.SIAP_ASYNC)
+        if (this.casdaDownloadMode != CasdaDownloadMode.SODA_ASYNC_WEB)
         {
             return;
         }
@@ -479,10 +480,10 @@ public class DataAccessThreadTest
             UWSJob uwsJob = new CasdaUwsJob(params);
 
             approximateErrorDateTime = new DateTime(DateTimeZone.UTC).plusHours(hoursToExpiryForDownloadMode);
-            DataAccessThread dataAccessThread =
-                    new DataAccessThread(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySync);
+            DataAccessThread dataAccessThread = new DataAccessThread(uwsJob, dataAccessService, packager, 
+            		hoursToExpiryDefault, hoursToExpirySync, "");
             dataAccessThread.jobWork();
-            if (this.casdaDownloadMode == CasdaDownloadMode.SIAP_ASYNC)
+            if (this.casdaDownloadMode == CasdaDownloadMode.SODA_ASYNC_WEB)
             {
                 fail("jobWork should have failed with a wrapped IllegalStateException"); // exception is expected
             }

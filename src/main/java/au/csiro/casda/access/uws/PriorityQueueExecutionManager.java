@@ -251,6 +251,17 @@ public class PriorityQueueExecutionManager extends QueuedExecutionManager
     {
         this.runningJobs.put(job.getJobId(), job);
     }
+    
+    /**
+     * WARNING: this adds a job to the list of queued. This is used for the for testing purposes.
+     * 
+     * @param job
+     *            the uws job to add to the list of running jobs
+     */
+    protected void addQueuedJob(UWSJob job)
+    {
+        this.queuedJobs.add(job);
+    }
 
     /**
      * WARNING: this removes a job to from list of running jobs but doesn't stop it running. This is used for the

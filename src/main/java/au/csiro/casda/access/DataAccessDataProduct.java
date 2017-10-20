@@ -31,8 +31,18 @@ public class DataAccessDataProduct
         visibility,
         /** cube records in obscore map to records in our image_cube database table */
         cube,
+        /** moment map records in obscore map to records in our moment_map database table */
+        moment_map,
+        /** cubelet records in obscore map to records in our cubelet database table */
+        cubelet,
+        /** spectrum records in obscore map to records in our spectrum database table */
+        spectrum,
         /** records in catalogue database table */
-        catalogue;
+        catalogue,
+        /** encapsulation files for full download */
+        encap,
+        /** Evaluation file */
+        evaluation;
     }
 
     private final DataAccessProductType dataAccessProductType;

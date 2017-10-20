@@ -95,7 +95,7 @@ public class DataAccessJobControllerTest
                         .param("userName", "bob").param("downloadMode", "WEB")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED))
                 .andExpect(status().isCreated())
-                .andExpect(header().string("location", "http://localhost/requests/" + job.getRequestId()))
+                .andExpect(header().string("location", "http://localhost/requests/" + job.getRequestId() + "/page/1"))
                 .andExpect(content().string(new ObjectMapper().writeValueAsString(Arrays.asList(job.getRequestId()))));
         verify(accessJobManager).createDataAccessJob(any());
 
@@ -115,7 +115,7 @@ public class DataAccessJobControllerTest
                         .param("userName", "bob").param("downloadMode", "WEB")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED))
                 .andExpect(status().isCreated())
-                .andExpect(header().string("location", "http://localhost/requests/" + job.getRequestId()))
+                .andExpect(header().string("location", "http://localhost/requests/" + job.getRequestId() + "/page/1"))
                 .andExpect(content().string(new ObjectMapper().writeValueAsString(Arrays.asList(job.getRequestId()))));
         verify(accessJobManager).createDataAccessJob(any());
 

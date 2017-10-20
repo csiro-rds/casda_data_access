@@ -23,7 +23,7 @@ import au.csiro.casda.entity.dataaccess.CachedFile.FileType;
  */
 public class FileDescriptor implements DownloadFile
 {
-
+	private Long id;
     /** Unique archive file id */
     private String fileId;
 
@@ -36,6 +36,8 @@ public class FileDescriptor implements DownloadFile
     private FileType fileType;
 
     private boolean complete;
+    
+    private String originalFilePath;
 
     /**
      * Simple constructor
@@ -79,8 +81,18 @@ public class FileDescriptor implements DownloadFile
         this(fileId, sizeKb, fileType);
         this.displayName = displayName;
     }
+    
+    public Long getId() 
+    {
+		return id;
+	}
 
-    public String getFileId()
+	public void setId(Long id)
+	{
+		this.id = id;
+	}
+
+	public String getFileId()
     {
         return fileId;
     }
@@ -133,6 +145,16 @@ public class FileDescriptor implements DownloadFile
     public void setComplete(boolean complete)
     {
         this.complete = complete;
+    }
+    
+    public String getOriginalFilePath()
+    {
+        return originalFilePath;
+    }
+
+    public void setOriginalFilePath(String originalFilePath)
+    {
+        this.originalFilePath = originalFilePath;
     }
 
     @SuppressWarnings("checkstyle:magicnumber")
@@ -201,7 +223,7 @@ public class FileDescriptor implements DownloadFile
         }
         return true;
     }
-
+    
     @Override
     public String toString()
     {
@@ -216,6 +238,8 @@ public class FileDescriptor implements DownloadFile
         builder.append(fileType);
         builder.append(", complete=");
         builder.append(complete);
+        builder.append(", originalFilePath=");
+        builder.append(originalFilePath);
         builder.append("]");
         return builder.toString();
     }

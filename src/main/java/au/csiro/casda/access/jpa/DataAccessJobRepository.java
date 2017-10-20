@@ -16,14 +16,12 @@ package au.csiro.casda.access.jpa;
 import java.util.List;
 
 import org.joda.time.DateTime;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
 import au.csiro.casda.entity.dataaccess.DataAccessJob;
 
 /**
@@ -51,25 +49,6 @@ public interface DataAccessJobRepository extends CrudRepository<DataAccessJob, L
     @Query("SELECT max(daj.expiredTimestamp) FROM CachedFile cf INNER JOIN cf.dataAccessJobs daj "
             + "WHERE cf.id = :cachedFileId")
     public DateTime findLatestJobExpiryForCachedFile(@Param(value = "cachedFileId") long cachedFileId);
-
-    /**
-     * Find jobs that 1) haven't had their status updated to 'EXPIRED', 2) match the given download mode and 3) expired
-     * before a give time.
-     * 
-     * @param time
-     *            the time before which the jobs expired.
-     * @param downloadMode
-     *            the download mode requested for the job
-     * @param pageable
-     *            Specification of how the results should be paged.
-     * 
-     * @return the list of jobs that match the download mode and have expired, but haven't had their status updated to
-     *         EXPIRED
-     */
-    @Query("SELECT daj FROM DataAccessJob daj WHERE daj.expiredTimestamp < :time AND daj.status != 'EXPIRED'"
-            + " AND daj.downloadMode = :downloadMode ORDER by daj.expiredTimestamp ASC")
-    public Page<DataAccessJob> findJobsToExpire(@Param(value = "time") DateTime time,
-            @Param(value = "downloadMode") CasdaDownloadMode downloadMode, Pageable pageable);
 
     /**
      * Finds requests that failed on or after the given date/time.
@@ -100,6 +79,16 @@ public interface DataAccessJobRepository extends CrudRepository<DataAccessJob, L
      */
     @Query("SELECT daj FROM DataAccessJob daj WHERE daj.status = 'PREPARING' ORDER BY daj.createdTimestamp")
     public List<DataAccessJob> findPreparingJobs();
+
+    /**
+     * Finds requests that have been in the prepared since before a specified time. 
+     * 
+     * @param time
+     *            the given date/time
+     * @return the list of old preparing jobs
+     */
+    @Query("SELECT daj FROM DataAccessJob daj WHERE daj.status = 'PREPARING' AND daj.createdTimestamp <= :time")
+    public List<DataAccessJob> findPreparingJobsOlderThanTime(@Param(value = "time") DateTime time);
     
     /**
      * Finds requests that are currently paused
@@ -108,5 +97,36 @@ public interface DataAccessJobRepository extends CrudRepository<DataAccessJob, L
      */
     @Query("SELECT daj FROM DataAccessJob daj WHERE daj.status = 'PAUSED' ORDER BY daj.createdTimestamp")
     public List<DataAccessJob> findPausedJobs();
-
+    
+    /**
+     * Expire all jobs
+     */
+    @Modifying
+    @Query("UPDATE DataAccessJob daj set "
+            + "daj.status = 'CANCELLED', "
+            + "daj.expiredTimestamp = current_timestamp, "
+            + "daj.errorMessage = 'Cache deleted by the administrator.' "
+            + "where daj.expiredTimestamp >= current_timestamp")
+    public void expireAllJobs();
+    
+    /**
+     * Finds jobs which will expire in the given time limit
+     * 
+     * @param maxTime
+     *            the given date/time
+     * @param minTime
+     *            the given date/time minus one day, so notification is only sned out once
+     * @return the list of jobs expiring in the given time limit
+     */
+    @Query("select daj from DataAccessJob daj where daj.status = 'READY' and "
+    		+ "daj.expiredTimestamp <= :maxTime and daj.expiredTimestamp > :minTime")
+    public List<DataAccessJob> findAllJobsForExpiryNotification(@Param(value = "maxTime") DateTime maxTime, 
+    		@Param(value = "minTime") DateTime minTime);
+    
+    /**
+     * find all jobs which have passed the expiredTimestamp date, but have not yet been set to expired
+     * @return the list of expired jobs
+     */
+    @Query("select daj from DataAccessJob daj where daj.status = 'READY' and daj.expiredTimestamp <= current_date()")
+    public List<DataAccessJob> findExpiredJobs();
 }

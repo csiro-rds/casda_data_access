@@ -40,9 +40,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -61,14 +63,17 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.data.domain.Page;
 
-import au.csiro.casda.access.CutoutFileDescriptor;
+import au.csiro.casda.access.GeneratedFileDescriptor;
 import au.csiro.casda.access.DownloadFile;
+import au.csiro.casda.access.EncapsulatedFileDescriptor;
 import au.csiro.casda.access.FileDescriptor;
 import au.csiro.casda.access.jpa.CachedFileRepository;
 import au.csiro.casda.access.jpa.DataAccessJobRepository;
 import au.csiro.casda.entity.dataaccess.CachedFile;
 import au.csiro.casda.entity.dataaccess.CachedFile.FileType;
 import au.csiro.casda.entity.dataaccess.DataAccessJob;
+import au.csiro.casda.entity.observation.EncapsulationFile;
+import au.csiro.casda.entity.observation.Observation;
 
 /**
  * Tests for the cache manager
@@ -100,11 +105,13 @@ public class CacheManagerTest
     private static final int MAX_DOWNLOAD_ATTEMPTS = 2;
 
     private File jobBaseFolder;
+    private File dataBaseFolder;
 
     @Before
     public void setup() throws Exception
     {
         jobBaseFolder = new File(TEST_WORKING_DIR, "jobs");
+        dataBaseFolder = new File(TEST_WORKING_DIR, "data");
         MockitoAnnotations.initMocks(this);
         cacheManager = spy(new CacheManager(MAX_CACHE_SIZE, MAX_DOWNLOAD_ATTEMPTS, TEST_WORKING_DIR,
                 cachedFileRepositoryMock, dataAccessJobRepositoryMock));
@@ -413,7 +420,8 @@ public class CacheManagerTest
     public void testReserveSpaceCutoutForImageOnDisk() throws Exception
     {
         Collection<DownloadFile> files = new ArrayList<DownloadFile>();
-        CutoutFileDescriptor cutout = new CutoutFileDescriptor(1L, "cutout-1-image-12", 11L, "image-12", 13L);
+        GeneratedFileDescriptor cutout = 
+        		new GeneratedFileDescriptor(1L, "cutout-1-image-12", 11L, "image-12", 13L, FileType.IMAGE_CUTOUT);
         cutout.setOriginalImageFilePath("original-image-path");
         files.add(cutout);
 
@@ -444,7 +452,8 @@ public class CacheManagerTest
     public void testReserveSpaceCutoutForImageInCache() throws Exception
     {
         Collection<DownloadFile> files = new ArrayList<DownloadFile>();
-        CutoutFileDescriptor cutout = new CutoutFileDescriptor(1L, "cutout-1-image-12", 11L, "image-12", 13L);
+        GeneratedFileDescriptor cutout = 
+        		new GeneratedFileDescriptor(1L, "cutout-1-image-12", 11L, "image-12", 13L, FileType.IMAGE_CUTOUT);
         files.add(cutout);
 
         CachedFile cachedFile = new CachedFile("image-12", "path-to-image-12", 13L, DateTime.now());
@@ -475,14 +484,86 @@ public class CacheManagerTest
         assertTrue(imageFileInCache.getUnlock().isAfter(DateTime.now().plusDays(3)));
         assertEquals("image-12", imageFileInCache.getFileId());
     }
+    
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @Test
+    public void testReserveSpaceGeneratedSpectrumOnDisk() throws Exception
+    {
+        Collection<DownloadFile> files = new ArrayList<DownloadFile>();
+        GeneratedFileDescriptor cutout = new GeneratedFileDescriptor(
+        		1L, "spectrum-1-image-12", 11L, "image-12", 13L, FileType.GENERATED_SPECTRUM);
+        cutout.setOriginalImageFilePath("original-image-path");
+        files.add(cutout);
+
+        doReturn(Optional.of(0L)).when(cachedFileRepositoryMock).sumCachedFileSize();
+        doReturn(Optional.of(0L)).when(cachedFileRepositoryMock).sumUnlockedCachedFileSize(any());
+
+        DataAccessJob dataAccessJob = new DataAccessJob();
+        dataAccessJob.setRequestId("Hello");
+        cacheManager.reserveSpaceAndRegisterFilesForDownload(files, dataAccessJob);
+
+        ArgumentCaptor<List> filesListCaptor = ArgumentCaptor.forClass(List.class);
+        verify(cachedFileRepositoryMock, times(1)).save(filesListCaptor.capture());
+
+        List<CachedFile> newCachedFiles = filesListCaptor.getValue();
+        assertEquals(1, newCachedFiles.size());
+        assertEquals("spectrum-1-image-12", newCachedFiles.get(0).getFileId());
+        assertEquals(Long.valueOf(11), newCachedFiles.get(0).getSizeKb());
+        assertEquals("original-image-path", newCachedFiles.get(0).getOriginalFilePath());
+        assertFalse(newCachedFiles.get(0).isFileAvailableFlag());
+        assertEquals(
+                new File(new File(jobBaseFolder, "Hello"), "spectrum-1-image-12").getAbsolutePath(),
+                newCachedFiles.get(0).getPath());
+        assertEquals(FileType.GENERATED_SPECTRUM, newCachedFiles.get(0).getFileType());
+    }
+    
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @Test
+    public void testReserveSpaceforGeneratedSpectrumInCache() throws Exception
+    {
+        Collection<DownloadFile> files = new ArrayList<DownloadFile>();
+        GeneratedFileDescriptor spectrum = new GeneratedFileDescriptor(
+        		1L, "spectrum-1-image-12", 11L, "image-12", 13L, FileType.GENERATED_SPECTRUM);
+        files.add(spectrum);
+
+        CachedFile cachedFile = new CachedFile("image-12", "path-to-image-12", 13L, DateTime.now());
+        doReturn(cachedFile).when(cachedFileRepositoryMock).findByFileId("image-12");
+        doReturn(Optional.of(0L)).when(cachedFileRepositoryMock).sumCachedFileSize();
+        doReturn(Optional.of(0L)).when(cachedFileRepositoryMock).sumUnlockedCachedFileSize(any());
+
+        DataAccessJob dataAccessJob = new DataAccessJob();
+        dataAccessJob.setRequestId("Hello");
+        cacheManager.reserveSpaceAndRegisterFilesForDownload(files, dataAccessJob);
+
+        ArgumentCaptor<List> filesListCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<CachedFile> cachedFileCaptor = ArgumentCaptor.forClass(CachedFile.class);
+        verify(cachedFileRepositoryMock, times(1)).save(cachedFileCaptor.capture());
+        verify(cachedFileRepositoryMock, times(1)).save(filesListCaptor.capture());
+
+        List<CachedFile> newCachedFiles = filesListCaptor.getValue();
+        assertEquals(1, newCachedFiles.size());
+        assertEquals("spectrum-1-image-12", newCachedFiles.get(0).getFileId());
+        assertEquals(Long.valueOf(11), newCachedFiles.get(0).getSizeKb());
+        assertNull(newCachedFiles.get(0).getOriginalFilePath());
+        assertFalse(newCachedFiles.get(0).isFileAvailableFlag());
+        assertEquals(new File(new File(jobBaseFolder, "Hello"), "spectrum-1-image-12").getAbsolutePath(),
+                newCachedFiles.get(0).getPath());
+        assertEquals(FileType.GENERATED_SPECTRUM, newCachedFiles.get(0).getFileType());
+
+        CachedFile imageFileInCache = cachedFileCaptor.getValue();
+        assertTrue(imageFileInCache.getUnlock().isAfter(DateTime.now().plusDays(3)));
+        assertEquals("image-12", imageFileInCache.getFileId());
+    }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
     @Test
     public void testReserveSpaceCutoutForImageNewForCache() throws Exception
     {
         Collection<DownloadFile> files = new ArrayList<DownloadFile>();
-        CutoutFileDescriptor cutout = new CutoutFileDescriptor(1L, "cutout-1-image-12", 11L, "image-12", 13L);
-        CutoutFileDescriptor cutout2 = new CutoutFileDescriptor(2L, "cutout-2-image-12", 11L, "image-12", 13L);
+        GeneratedFileDescriptor cutout = 
+        		new GeneratedFileDescriptor(1L, "cutout-1-image-12", 11L, "image-12", 13L, FileType.IMAGE_CUTOUT);
+        GeneratedFileDescriptor cutout2 = 
+        		new GeneratedFileDescriptor(2L, "cutout-2-image-12", 11L, "image-12", 13L, FileType.IMAGE_CUTOUT);
         files.add(cutout);
         files.add(cutout2);
 
@@ -520,6 +601,55 @@ public class CacheManagerTest
         assertEquals(new File(jobFolder, "cutout-2-image-12").getAbsolutePath(),
                 newCachedFiles.get(2).getPath());
         assertEquals(FileType.IMAGE_CUTOUT, newCachedFiles.get(2).getFileType());
+    }
+
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @Test
+    public void testReserveSpaceEncapsulationNewForCache() throws Exception
+    {
+        Collection<DownloadFile> files = new ArrayList<DownloadFile>();
+        Observation obs = new Observation();
+        obs.setSbid(5);
+        EncapsulationFile encaps = new EncapsulationFile();
+        encaps.setFilename("observation-5-encaps-spectrum-2.tar");
+        encaps.setFormat("tar");
+        encaps.setFilesize(30L);
+        encaps.setId(20L);
+        encaps.setParent(obs);
+        EncapsulatedFileDescriptor efd1 = new EncapsulatedFileDescriptor("observation-5-spectrum-spect1-noise.fits", 5, 
+                FileType.SPECTRUM, "spect1-noise.fits", encaps);
+        files.add(efd1);
+
+        doReturn(Optional.of(0L)).when(cachedFileRepositoryMock).sumCachedFileSize();
+        doReturn(Optional.of(0L)).when(cachedFileRepositoryMock).sumUnlockedCachedFileSize(any());
+
+        DataAccessJob dataAccessJob = new DataAccessJob();
+        dataAccessJob.setRequestId("Hello");
+        cacheManager.reserveSpaceAndRegisterFilesForDownload(files, dataAccessJob);
+
+        ArgumentCaptor<List> filesListCaptor = ArgumentCaptor.forClass(List.class);
+        verify(cachedFileRepositoryMock, times(1)).save(filesListCaptor.capture());
+
+        List<CachedFile> newCachedFiles = filesListCaptor.getValue();
+        assertEquals(2, newCachedFiles.size());
+        assertEquals("observation-5-spectrum-spect1-noise.fits", newCachedFiles.get(0).getFileId());
+        assertEquals(Long.valueOf(5), newCachedFiles.get(0).getSizeKb());
+        assertNull(newCachedFiles.get(0).getOriginalFilePath());
+        assertFalse(newCachedFiles.get(0).isFileAvailableFlag());
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+        File destFolder = new File(dataBaseFolder, dateFormat.format(new Date()));
+        assertEquals(new File(destFolder, "observation-5-spectrum-spect1-noise.fits").getAbsolutePath(),
+                newCachedFiles.get(0).getPath());
+        assertEquals(FileType.SPECTRUM, newCachedFiles.get(0).getFileType());
+
+        CachedFile encapsFileInCache = newCachedFiles.get(1);
+        assertTrue(encapsFileInCache.getUnlock().isAfter(DateTime.now().plusDays(3)));
+        assertEquals("observations-5-encapsulation_files-20.tar", encapsFileInCache.getFileId());
+        assertEquals(Long.valueOf(30), encapsFileInCache.getSizeKb());
+        
+        assertEquals(new File(destFolder, "observations-5-encapsulation_files-20.tar").getAbsolutePath(),
+                efd1.getOriginalEncapsulationFilePath());
+        // C:\Projects\casda\casda_data_access\build\tempTest\data\2016-12-12\observations-5-encapsulation_files-20.tar
     }
 
     @Test
@@ -840,6 +970,47 @@ public class CacheManagerTest
         assertFalse(Files.exists(testFileChecksum));
         assertTrue(Files.exists(testFileExtra));
         assertTrue(Files.exists(Paths.get(jobFolder)));
+    }
+    
+    @Test
+    public void testDeleteAllCache() throws Exception
+    {          
+        String testFilename = "deleteCachedFileTestA.txt";
+
+        jobBaseFolder.mkdirs();
+        dataBaseFolder.mkdirs();
+
+        Path testFile = Paths.get(jobBaseFolder.getPath(), testFilename);
+        Path testFileChecksum = Paths.get(jobBaseFolder.getPath(), testFilename);
+        
+        Path testDataFile = Paths.get(dataBaseFolder.getPath(), testFilename);
+        Path testDataFileChecksum = Paths.get(dataBaseFolder.getPath(), testFilename);
+
+        FileUtils.touch(testFile.toFile());
+        FileUtils.touch(testFileChecksum.toFile());
+        
+        FileUtils.touch(testDataFile.toFile());
+        FileUtils.touch(testDataFileChecksum.toFile());
+
+        assertTrue(Files.exists(testFile));
+        assertTrue(Files.exists(testFileChecksum));
+        
+        assertTrue(Files.exists(testDataFile));
+        assertTrue(Files.exists(testDataFileChecksum));
+
+        cacheManager.deleteAllCache();
+
+        assertFalse(Files.exists(testFile));
+        assertFalse(Files.exists(testFileChecksum));
+        
+        assertFalse(Files.exists(testDataFile));
+        assertFalse(Files.exists(testDataFileChecksum));
+
+
+        assertFalse(Files.exists(testFile));
+        assertFalse(Files.exists(testFileChecksum));
+        assertTrue(Files.exists(Paths.get(jobBaseFolder.getPath())));
+        assertTrue(Files.exists(Paths.get(dataBaseFolder.getPath())));
     }
 
 }
