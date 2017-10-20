@@ -82,6 +82,7 @@ import org.springframework.web.util.NestedServletException;
 import org.xml.sax.SAXException;
 
 import au.csiro.TestUtils;
+import au.csiro.casda.AESTRule;
 import au.csiro.casda.access.BadRequestException;
 import au.csiro.casda.access.DataAccessDataProduct;
 import au.csiro.casda.access.DataAccessDataProduct.DataAccessProductType;
@@ -1057,6 +1058,9 @@ public class AccessDataControllerTest
     {
         @Rule
         public ExpectedException exception = ExpectedException.none();
+
+        @Rule
+        public AESTRule utcRule = new AESTRule();
 
         @Mock
         private AccessJobManager accessJobManager;

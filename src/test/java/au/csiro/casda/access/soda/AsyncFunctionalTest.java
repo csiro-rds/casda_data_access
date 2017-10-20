@@ -63,6 +63,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExc
 import org.springframework.web.util.NestedServletException;
 import org.xml.sax.SAXException;
 
+import au.csiro.casda.AESTRule;
 import au.csiro.casda.access.ResourceNoLongerAvailableException;
 import au.csiro.casda.access.SystemStatus;
 import au.csiro.casda.access.cache.CacheManager;
@@ -116,6 +117,9 @@ public class AsyncFunctionalTest
     @Rule
     public ExpectedException exception = ExpectedException.none();
 
+    @Rule
+    public AESTRule utcRule = new AESTRule();
+
     @Mock
     private EntityManagerFactory emf;
 
@@ -160,7 +164,7 @@ public class AsyncFunctionalTest
 
     @Mock
     private Packager packager;
-
+    
     private static final long MAX_SMALL_JOB_SIZE_KB = 100000;
 
     private AccessDataController controller;
