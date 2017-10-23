@@ -5,10 +5,10 @@
     <uws:ownerId xsi:nil="true" />
     <uws:phase>COMPLETED</uws:phase>
     <uws:quote xsi:nil="true" />
-    <uws:startTime>2015-12-06T18:25:13.823+1100</uws:startTime>
-    <uws:endTime>2015-12-06T17:33:12.431+1100</uws:endTime>
+    <uws:startTime>2015-12-06T07:25:13.823+0000</uws:startTime>
+    <uws:endTime>2015-12-06T06:33:12.431+0000</uws:endTime>
     <uws:executionDuration>0</uws:executionDuration>
-    <uws:destruction>2999-12-13T17:33:12.431+1100</uws:destruction>
+    <uws:destruction>2999-12-13T06:33:12.431+0000</uws:destruction>
     <uws:parameters>
         <uws:parameter id="id"><![CDATA[V6PwDSDhW04rp0dXkiYfcrphfUdanKDX3iiyjQltHM3VV1TWKMTHxNWpbBqWq7cj]]></uws:parameter>
     </uws:parameters>

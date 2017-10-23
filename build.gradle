@@ -161,6 +161,12 @@ dependencies {
 
 apply from: 'gradle/versioning.gradle'
 
+test {
+    testLogging {
+        exceptionFormat = 'full'
+    }
+}
+
 war {
     duplicatesStrategy = "EXCLUDE"
     baseName = 'casda_data_access'

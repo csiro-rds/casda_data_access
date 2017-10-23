@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
@@ -63,7 +64,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExc
 import org.springframework.web.util.NestedServletException;
 import org.xml.sax.SAXException;
 
-import au.csiro.casda.AESTRule;
 import au.csiro.casda.access.ResourceNoLongerAvailableException;
 import au.csiro.casda.access.SystemStatus;
 import au.csiro.casda.access.cache.CacheManager;
@@ -96,6 +96,7 @@ import au.csiro.casda.entity.observation.ImageCube;
 import au.csiro.casda.entity.observation.MeasurementSet;
 import au.csiro.casda.entity.observation.Observation;
 import au.csiro.casda.jobmanager.ProcessJobBuilder.ProcessJobFactory;
+import uws.job.UWSJob;
 import uws.service.file.LocalUWSFileManager;
 
 /**
@@ -116,9 +117,6 @@ public class AsyncFunctionalTest
 
     @Rule
     public ExpectedException exception = ExpectedException.none();
-
-    @Rule
-    public AESTRule utcRule = new AESTRule();
 
     @Mock
     private EntityManagerFactory emf;
@@ -207,6 +205,8 @@ public class AsyncFunctionalTest
     @Before
     public void setUp() throws Exception
     {
+        UWSJob.dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+
         MockitoAnnotations.initMocks(this);
 
         hoursToExpiryDefault = RandomUtils.nextInt(20, 30);

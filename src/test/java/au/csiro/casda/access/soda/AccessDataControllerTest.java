@@ -45,6 +45,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import org.apache.commons.codec.binary.Base64;
@@ -82,7 +83,6 @@ import org.springframework.web.util.NestedServletException;
 import org.xml.sax.SAXException;
 
 import au.csiro.TestUtils;
-import au.csiro.casda.AESTRule;
 import au.csiro.casda.access.BadRequestException;
 import au.csiro.casda.access.DataAccessDataProduct;
 import au.csiro.casda.access.DataAccessDataProduct.DataAccessProductType;
@@ -139,7 +139,7 @@ import uws.job.user.DefaultJobOwner;
 @RunWith(Enclosed.class)
 public class AccessDataControllerTest
 {
-	
+    
     private static Map<String, Object> createCount()
     {
         Map<String, Object> paging = new HashMap<String, Object>();
@@ -1059,9 +1059,6 @@ public class AccessDataControllerTest
         @Rule
         public ExpectedException exception = ExpectedException.none();
 
-        @Rule
-        public AESTRule utcRule = new AESTRule();
-
         @Mock
         private AccessJobManager accessJobManager;
 
@@ -1082,6 +1079,7 @@ public class AccessDataControllerTest
                     5000, 100000);
             this.mockMvc = MockMvcBuilders.standaloneSetup(controller)
                     .setHandlerExceptionResolvers(new ExceptionHandlerExceptionResolver()).build();
+            UWSJob.dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
         }
 
         @Test
@@ -1115,7 +1113,7 @@ public class AccessDataControllerTest
         public void testNonExpiredJob() throws Exception
         {
             String jobId = "iReSuKZ9D7LTNcMLcoYA";
-            DateTime created = new DateTime("2015-11-21T12:34:55.245+11:00");
+            DateTime created = new DateTime("2015-11-21T01:34:55.245+00:00");
             DataAccessJob dataAccessJob = createDataAccessJob(jobId, DataAccessJobStatus.PREPARING, created,
                     Arrays.asList(createImageCube(12111, 12L, "image.fits")),
                     Arrays.asList(createMeasurementSet(121112, 15L, "visibility.fits")), null, null, null);

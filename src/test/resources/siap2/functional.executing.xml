@@ -5,7 +5,7 @@
     <uws:ownerId xsi:nil="true" />
     <uws:phase>EXECUTING</uws:phase>
     <uws:quote xsi:nil="true" />
-    <uws:startTime>2015-12-06T18:25:13.823+1100</uws:startTime>
+    <uws:startTime>2015-12-06T07:25:13.823+0000</uws:startTime>
     <uws:endTime xsi:nil="true" />
     <uws:executionDuration>0</uws:executionDuration>
     <uws:destruction xsi:nil="true" />
