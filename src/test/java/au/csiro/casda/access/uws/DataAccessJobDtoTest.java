@@ -15,14 +15,14 @@ import org.joda.time.DateTimeZone;
 import org.joda.time.format.ISODateTimeFormat;
 import org.junit.Test;
 
+import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
+import au.csiro.casda.entity.dataaccess.DataAccessJob;
+import au.csiro.casda.entity.dataaccess.DataAccessJobStatus;
 import uws.job.ExecutionPhase;
 import uws.job.Result;
 import uws.job.UWSJob;
 import uws.job.parameters.UWSParameters;
 import uws.job.user.DefaultJobOwner;
-import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
-import au.csiro.casda.entity.dataaccess.DataAccessJob;
-import au.csiro.casda.entity.dataaccess.DataAccessJobStatus;
 
 /*
  * #%L

@@ -17,6 +17,10 @@
 <title>CSIRO Data Access Portal - CASDA Access Job Queue</title>
 <%@include file="include/head.jsp"%>
 </head>
+<script type="text/javascript" src="/casda_data_access/js/jquery-2.2.1.min.js"></script>
+<script src="/casda_data_access/js/jquery.loading-indicator.min.js"></script>
+<link rel="stylesheet" type="text/css" href="<c:url value='/css/loading.css'/>" />
+
 
 <body>
 	<form:form id="modifyJobForm" name='modifyJobForm' method="post"
@@ -42,7 +46,7 @@
 
 			<div id="content">
 				<div class="indentRight">
-					<a href="/casda_data_access/logout">logout</a>
+					<a href="/casda_data_access/queuedJobs">Processing Queue</a>&nbsp;|&nbsp;<a  href="javascript:clearAllCache();">delete all cache</a>&nbsp;|&nbsp;<a href="/casda_data_access/logout">logout</a>
 				</div>
 				<br>
 
@@ -83,10 +87,32 @@
 </body>
 
 <script type="text/javascript">
+
 	function DoSubmit(reqId) {
+		var homeLoader = $('body').loadingIndicator({
+			useImage: false,
+		}).data("loadingIndicator");
 		document.getElementById("requestId").value = reqId;
 		modifyJobForm.submit;
 		return false;
+	}
+	
+	function clearAllCache()
+	{
+		if(confirm('This action will delete all cached files and mark all running and completed jobs to expired. Are you sure you want to continue?') &&
+			confirm('This action is irreversible. Are you really sure you want to continue?'))
+		{
+		
+			var homeLoader = $('body').loadingIndicator({
+				useImage: false,
+			}).data("loadingIndicator");
+			var input = $("<input>")
+	            .attr("type", "hidden")
+	            .attr("name", "action").val("deleteAllCache");
+				$('#modifyJobForm').append($(input));
+			document.getElementById('modifyJobForm').submit();
+		}
+		return false;		
 	}
 </script>
 

@@ -55,13 +55,13 @@ public interface CacheManagerInterface
      * @param dataAccessJob
      *            the data access job to reserve space for
      * 
-     * @return the total size of the files that are already in the cache
+     * @return An Object array with total size of the files and list of cache file that are already in the cache
      * @throws CacheFullException
      *             if the cache is full and can't reserve space for this job
      * @throws CacheException
      *             if there is any other problem reserving space for this job
      */
-    public long reserveSpaceAndRegisterFilesForDownload(Collection<DownloadFile> files, DataAccessJob dataAccessJob)
+    public Object[] reserveSpaceAndRegisterFilesForDownload(Collection<DownloadFile> files, DataAccessJob dataAccessJob)
             throws CacheFullException, CacheException;
 
     /**
@@ -184,7 +184,17 @@ public interface CacheManagerInterface
      * 
      * @param cachedFile
      *            cachedFile entry to be deleted
+      * @throws CacheException
+     *             if the file failed to to deleted from the cache.
      */
-    public void clearCacheIfPossible(CachedFile cachedFile);
+    public void clearCacheIfPossible(CachedFile cachedFile) throws CacheException;
+    
+    /**
+     * Delete all cache entries and clean up the disk
+     * 
+     * @throws CacheException
+     *             if fails to clear out cache.
+     */
+    public void deleteAllCache() throws CacheException;
 
 }

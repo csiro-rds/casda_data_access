@@ -31,9 +31,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 
@@ -120,38 +117,6 @@ public class DataAccessJobRepositoryTest
         DateTime latestDate = dataAccessJobRepository.findLatestJobExpiryForCachedFile(cachedFileId);
         assertNotNull(latestDate);
         assertEquals(dateOfLatest, latestDate);
-    }
-
-    @Test
-    public void testFindJobsToExpire()
-    {
-        Pageable pageable = new PageRequest(0, 2);
-
-        Page<DataAccessJob> page =
-                dataAccessJobRepository.findJobsToExpire(DateTime.now(), CasdaDownloadMode.PAWSEY_HTTP, pageable);
-        assertEquals(2, page.getTotalPages());
-        assertTrue(page.hasContent());
-        assertEquals(2, page.getNumberOfElements());
-        List<DataAccessJob> jobs = page.getContent();
-        assertEquals("request5", jobs.get(0).getRequestId());
-        assertEquals("request7", jobs.get(1).getRequestId());
-
-        pageable = pageable.next();
-        page = dataAccessJobRepository.findJobsToExpire(DateTime.now(), CasdaDownloadMode.PAWSEY_HTTP, pageable);
-        assertEquals(2, page.getTotalPages());
-        assertTrue(page.hasContent());
-        assertEquals(1, page.getNumberOfElements());
-        jobs = page.getContent();
-        assertEquals("request6", jobs.get(0).getRequestId());
-
-        pageable = new PageRequest(0, 2);
-        page = dataAccessJobRepository.findJobsToExpire(DateTime.now(), CasdaDownloadMode.WEB, pageable);
-        assertEquals(1, page.getTotalPages());
-        assertTrue(page.hasContent());
-        assertEquals(2, page.getNumberOfElements());
-        jobs = page.getContent();
-        assertEquals("request4", jobs.get(0).getRequestId());
-        assertEquals("request2", jobs.get(1).getRequestId());
     }
 
     @Test

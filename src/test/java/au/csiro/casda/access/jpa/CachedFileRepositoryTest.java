@@ -1,5 +1,11 @@
 package au.csiro.casda.access.jpa;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+
 /*
  * #%L
  * CSIRO ASKAP Science Data Archive
@@ -14,13 +20,9 @@ package au.csiro.casda.access.jpa;
 
 
 import static org.hamcrest.CoreMatchers.is;
+
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.not;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
 
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;

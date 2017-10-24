@@ -78,4 +78,39 @@ public interface DownloadFile
      *            whether the download of the file has completed
      */
     public void setComplete(boolean complete);
+    
+    /**
+     * @return the file path on the Disk
+     */
+    public String getOriginalFilePath();
+    
+    /**
+     * @return the id
+     */
+    public Long getId();
+
+    /**
+     * @param id the id to set
+     */
+	public void setId(Long id);
+	
+	/**
+	 * @return true if this file is a type of user generated file
+	 */
+	public default boolean isGeneratedFileType()
+	{
+		return getFileType() == FileType.IMAGE_CUTOUT || getFileType() == FileType.GENERATED_SPECTRUM;
+	}
+	
+	/**
+	 * @return true if this file is of a type which is encapsulated for storage
+	 */
+	public default boolean isEncapsulatedType()
+	{
+		return 	getFileType() == FileType.MOMENT_MAP || 
+				getFileType() == FileType.CUBELET || 
+        		getFileType() == FileType.SPECTRUM || 
+        		getFileType() == FileType.THUMBNAIL ||
+        		getFileType() == FileType.EVALUATION_FILE;
+	}
 }

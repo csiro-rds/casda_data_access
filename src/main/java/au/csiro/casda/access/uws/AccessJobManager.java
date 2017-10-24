@@ -17,7 +17,6 @@ import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
-import javax.transaction.Transactional;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.ArrayUtils;
@@ -29,35 +28,56 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Scope;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import au.csiro.casda.access.CasdaDataAccessEvents;
 import au.csiro.casda.access.DataAccessDataProduct;
 import au.csiro.casda.access.DataAccessDataProduct.DataAccessProductType;
 import au.csiro.casda.access.DataAccessUtil;
 import au.csiro.casda.access.DownloadFile;
+import au.csiro.casda.access.GeneratedFileDescriptor;
+import au.csiro.casda.access.ImageFormat;
 import au.csiro.casda.access.JobDto;
 import au.csiro.casda.access.ResourceIllegalStateException;
 import au.csiro.casda.access.ResourceNotFoundException;
 import au.csiro.casda.access.SizeLimitReachedException;
+import au.csiro.casda.access.cache.CacheException;
 import au.csiro.casda.access.cache.CacheManagerInterface;
 import au.csiro.casda.access.jpa.CatalogueRepository;
+import au.csiro.casda.access.jpa.CubeletRepository;
 import au.csiro.casda.access.jpa.DataAccessJobRepository;
+import au.csiro.casda.access.jpa.EncapsulationFileRepository;
+import au.csiro.casda.access.jpa.EvaluationFileRepository;
 import au.csiro.casda.access.jpa.ImageCubeRepository;
 import au.csiro.casda.access.jpa.MeasurementSetRepository;
-import au.csiro.casda.access.siap2.CutoutBounds;
-import au.csiro.casda.access.siap2.CutoutService;
+import au.csiro.casda.access.jpa.MomentMapRepository;
+import au.csiro.casda.access.jpa.SpectrumRepository;
+import au.csiro.casda.access.services.CasdaMailService;
+import au.csiro.casda.access.services.DataAccessService;
+import au.csiro.casda.access.soda.GeneratedFileBounds;
+import au.csiro.casda.access.soda.GenerateFileService;
 import au.csiro.casda.access.soda.ImageCubeAxis;
+import au.csiro.casda.access.util.Utils;
 import au.csiro.casda.entity.dataaccess.CachedFile;
-import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
 import au.csiro.casda.entity.dataaccess.DataAccessJob;
 import au.csiro.casda.entity.dataaccess.DataAccessJobStatus;
+import au.csiro.casda.entity.dataaccess.GeneratedSpectrum;
 import au.csiro.casda.entity.dataaccess.ImageCutout;
 import au.csiro.casda.entity.dataaccess.ParamMap;
+import au.csiro.casda.entity.dataaccess.CachedFile.FileType;
 import au.csiro.casda.entity.observation.Catalogue;
+import au.csiro.casda.entity.observation.Cubelet;
+import au.csiro.casda.entity.observation.EncapsulationFile;
+import au.csiro.casda.entity.observation.EvaluationFile;
 import au.csiro.casda.entity.observation.ImageCube;
 import au.csiro.casda.entity.observation.MeasurementSet;
+import au.csiro.casda.entity.observation.MomentMap;
+import au.csiro.casda.entity.observation.Spectrum;
 import au.csiro.casda.jobmanager.JobManager;
+import au.csiro.casda.logging.CasdaLogMessageBuilderFactory;
+import au.csiro.casda.logging.LogEvent;
 import uws.UWSException;
 import uws.job.ErrorSummary;
 import uws.job.ErrorType;
@@ -98,7 +118,7 @@ import uws.service.file.UWSFileManager;
  * <li>QUEUED - the job has been submitted for processing but is not yet being processed. Jobs can transition to this
  * state from:
  * <ul>
- * <li>PENDING - using {@link #scheduleJob(DataAccessJob)}</li>
+ * <li>PENDING - using {@link #scheduleJob(String)}</li>
  * <li>ERROR - using {@link #retryJob(String)}</li>
  * <li>ABORTED - using {@link #retryJob(String)}</li>
  * <li>COMPLETED - using {@link #retryJob(String)}</li>
@@ -112,7 +132,7 @@ import uws.service.file.UWSFileManager;
  * <li>ABORTED - jobs that have not finished (COMPLETED or ERROR) can be aborted using
  * {@link #cancelJob(String, DateTime)}.</li>
  * <li>HELD - jobs that have not finished (COMPLETED or ERROR) or been ABORTED can be paused using
- * {@link #pauseJob(String, DateTime)}.</li>
+ * {@link #pauseJob(String)}.</li>
  * </ul>
  * The UWS spec also has a SUSPENDED and UNKNOWN state but these states are not used by this system.
  * <p>
@@ -180,13 +200,13 @@ public class AccessJobManager
     public static final String REQUEST_ID = "REQUEST_ID";
 
     /**
-     * Name of the list of category A (size <= category.a.job.max.size.kb, files not in cache when job was created) data
+     * Name of the list of category A (size &lt;= category.a.job.max.size.kb, files not in cache when job was created) data
      * access jobs in UWS.
      */
     public static final String CATEGORY_A_JOB_LIST_NAME = "Category A";
 
     /**
-     * Name of the list of category A (size > category.a.job.max.size.kb, files not in cache when job was created) data
+     * Name of the list of category A (size &gt; category.a.job.max.size.kb, files not in cache when job was created) data
      * access jobs in UWS.
      */
     public static final String CATEGORY_B_JOB_LIST_NAME = "Category B";
@@ -222,7 +242,17 @@ public class AccessJobManager
     private final CatalogueRepository catalogueRepository;
 
     private final MeasurementSetRepository measurementSetRepository;
-
+    
+    private final EncapsulationFileRepository encapsulationFileRepository;
+    
+    private final EvaluationFileRepository evaluationFileRepository;
+    
+    private final SpectrumRepository spectrumRepository;
+    
+    private final MomentMapRepository momentMapRepository;
+    
+    private final CubeletRepository cubeletRepository;
+    
     private final CacheManagerInterface cacheManager;
 
     private final int displayDaysOfAvailableJobs;
@@ -237,12 +267,21 @@ public class AccessJobManager
 
     private UWSService uws;
 
-    private CutoutService cutoutService;
+    private GenerateFileService generateFileService;
 
     private final EntityManagerFactory emf;
     
     private JobManager slurmJobManager;
      
+    private String dataLinkAccessSecretKey;
+    
+    private DataAccessService dataAccessService;
+    
+    private CasdaMailService casdaMailService;
+    
+    private int expiryNotificationPeriod;
+
+    private int hoursToExpiryDefault;
 
     /**
      * Constructor
@@ -257,16 +296,30 @@ public class AccessJobManager
      *            a CatalogueCubeRepository used to access Catalogue data products
      * @param measurementSetRepository
      *            a MeasurementSetRepository used to access MeasurementSet (visibility) data products
+     * @param spectrumRepository
+     *            The JPA repository for the spectrumRepository table.
+     * @param momentMapRepository
+     *            The JPA repository for the momentMapRepository table.
+     * @param cubeletRepository
+     *            The JPA repository for the cubeletRepository table.
+     * @param encapsulationFileRepository
+     *            The JPA repository for the encapsulationFile table.
+     * @param evaluationFileRepository
+     *            The JPA repository for the evaluationFile table.
      * @param cacheManager
      *            the cache manager
      * @param uwsFactory
      *            a UWSFactory that will be used to create an appropriate JobThread to process a DataAccessJob
      * @param uwsFileManager
      *            a UWSFileManager that will be used to manage the persistence of of the job queues
-     * @param cutoutService
-     *            The service for calculating cutout bounds.
+     * @param generateFileService
+     *            The service for calculating the generated file's bounds.
      * @param slurmJobManager
      *            The Slurm job manager.
+     * @param dataAccessService
+     *            The dataAccessService
+     * @param casdaMailService
+     * 			  the email service for sending user notifications
      * @param baseUrl
      *            the uws base url
      * @param categoryAMaxRunningJobs
@@ -281,30 +334,46 @@ public class AccessJobManager
      *            the maximum size of a category A job, in KB
      * @param fileDownloadBaseUrl
      *            the base URL used to obtain result files
+     * @param dataLinkAccessSecretKey
+     * 			  the key for unencrypting the id token
+     * @param expiryNotificationPeriod
+     * 			  the amount of notice users get before their job expires
+     * @param hoursToExpiryDefault
+     *            the default number of hours until a job will expire
      */
     @Autowired
     public AccessJobManager(EntityManagerFactory emf, DataAccessJobRepository dataAccessJobRepository,
             ImageCubeRepository imageCubeRepository, CatalogueRepository catalogueRepository,
-            MeasurementSetRepository measurementSetRepository, CacheManagerInterface cacheManager,
-            UWSFactory uwsFactory, UWSFileManager uwsFileManager, CutoutService cutoutService,
-            JobManager slurmJobManager,
+            MeasurementSetRepository measurementSetRepository, SpectrumRepository spectrumRepository, 
+            MomentMapRepository momentMapRepository, CubeletRepository cubeletRepository, 
+            EncapsulationFileRepository encapsulationFileRepository, 
+            EvaluationFileRepository evaluationFileRepository, CacheManagerInterface cacheManager, 
+            UWSFactory uwsFactory, UWSFileManager uwsFileManager, GenerateFileService generateFileService, 
+            JobManager slurmJobManager, DataAccessService dataAccessService,
+            CasdaMailService casdaMailService,
             @Value("${uws.baseurl}") String baseUrl,
             @Value("${uws.category.a.maxrunningjobs}") int categoryAMaxRunningJobs,
             @Value("${uws.category.b.maxrunningjobs}") int categoryBMaxRunningJobs,
             @Value("${admin.ui.availablejobs.days}") int displayDaysOfAvailableJobs,
             @Value("${admin.ui.failedjobs.days}") int displayDaysOfFailedJobs,
             @Value("${category.a.job.max.size.kb}") long categoryAJobMaxSize,
-            @Value("${application.base.url}") String fileDownloadBaseUrl)
+            @Value("${download.base.url}") String fileDownloadBaseUrl,
+            @Value("${siap.shared.secret.key}") String dataLinkAccessSecretKey,
+            @Value("${email.expiry.notification.period}") int expiryNotificationPeriod,
+            @Value("${hours.to.expiry.default}") int hoursToExpiryDefault)
     {
         this.emf = emf;
         this.dataAccessJobRepository = dataAccessJobRepository;
         this.imageCubeRepository = imageCubeRepository;
         this.catalogueRepository = catalogueRepository;
         this.measurementSetRepository = measurementSetRepository;
+        this.spectrumRepository = spectrumRepository;
+        this.momentMapRepository = momentMapRepository;
+        this.cubeletRepository = cubeletRepository;
         this.cacheManager = cacheManager;
         this.uwsFactory = uwsFactory;
         this.uwsFileManager = uwsFileManager;
-        this.cutoutService = cutoutService;
+        this.generateFileService = generateFileService;
         this.baseUrl = baseUrl;
         this.categoryAMaxRunningJobs = categoryAMaxRunningJobs;
         this.categoryBMaxRunningJobs = categoryBMaxRunningJobs;
@@ -313,6 +382,13 @@ public class AccessJobManager
         this.categoryAJobMaxSize = categoryAJobMaxSize;
         this.fileDownloadBaseUrl = fileDownloadBaseUrl;
         this.slurmJobManager = slurmJobManager;
+        this.dataLinkAccessSecretKey = dataLinkAccessSecretKey;
+        this.dataAccessService = dataAccessService;
+        this.encapsulationFileRepository = encapsulationFileRepository;
+        this.evaluationFileRepository = evaluationFileRepository;
+        this.casdaMailService = casdaMailService;
+        this.expiryNotificationPeriod = expiryNotificationPeriod;
+        this.hoursToExpiryDefault = hoursToExpiryDefault;
     }
 
     /**
@@ -330,10 +406,18 @@ public class AccessJobManager
         {
             return uwsJob.getJobList();
         }
+        
+        boolean runImmediately = true;
+        
+        List<Map<FileType, Integer[]>> paging = dataAccessService.getPaging(dataAccessJob.getRequestId(), false);
+        
+        for(int pageNum = 0; pageNum < paging.size(); pageNum++)
+        {
+        	List<DownloadFile> files = dataAccessService.getPageOfFiles(paging.get(pageNum), dataAccessJob);
+        	runImmediately &= cacheManager.allFilesAvailableInCache(files);
+        }
+        
         // if all the files are already available in the cache, run the job immediately
-        boolean runImmediately = cacheManager.allFilesAvailableInCache(DataAccessUtil
-                .getDataAccessJobDownloadFiles(dataAccessJob, cacheManager.getJobDirectory(dataAccessJob)));
-
         if (runImmediately)
         {
             // this job list doesn't have a queue, so will start jobs immediately
@@ -350,6 +434,80 @@ public class AccessJobManager
             return categoryBJobList;
         }
     }
+    
+    /**
+     * scheduled job which checks for expiring data access jobs and sends out notifications for those expiring within
+     * the given window, period in properties &amp; period ,minus one day, this will stop multiple notifications 
+     * from being sent out
+     */
+    @Scheduled(cron = "${email.expiring.period}")
+    public void handleStatusAndNotificationsForExpiringJobs()
+    {
+        logger.info("Started actioning expiring jobs");
+        int numEmails = 0;
+    	for(DataAccessJob job : 
+    		dataAccessJobRepository.findAllJobsForExpiryNotification(new DateTime().plusDays(expiryNotificationPeriod), 
+    				new DateTime().plusDays(expiryNotificationPeriod-1)))
+    	{
+    		casdaMailService.sendEmail(job, CasdaMailService.EXPIRING_EMAIL, CasdaMailService.EXPIRING_EMAIL_SUBJECT);
+    		numEmails++;
+    	}
+    	for(DataAccessJob job : dataAccessJobRepository.findExpiredJobs())
+    	{
+    		casdaMailService.sendEmail(job, CasdaMailService.EXPIRED_EMAIL, CasdaMailService.EXPIRED_EMAIL_SUBJECT);
+            numEmails++;
+    		job.setStatus(DataAccessJobStatus.EXPIRED);
+    		dataAccessJobRepository.save(job);
+    	}
+    	// Expire any old preparing jobs
+    	DateTime newestCreationTime = new DateTime().minusHours(hoursToExpiryDefault);
+        for(DataAccessJob job : dataAccessJobRepository.findPreparingJobsOlderThanTime(newestCreationTime))
+        {
+            logger.info("Expiring old unstarted job " + job.getRequestId());
+            job.setStatus(DataAccessJobStatus.EXPIRED);
+            job.setExpiredTimestamp(new DateTime());
+            dataAccessJobRepository.save(job);
+        }
+        logger.info("Finished actioning expiring jobs. " + numEmails + " emails sent.");
+    }
+    
+    /**
+     * @param dataAccessJob the job to find position in queue for
+     * @return the queue position of this job
+     */
+    public int getPositionInJobList(DataAccessJob dataAccessJob)
+    {
+    	UWSJob uwsJob = getJob(dataAccessJob.getRequestId());
+    	if(uwsJob == null || uwsJob.getPhase() == ExecutionPhase.COMPLETED 
+    			|| uwsJob.getPhase() == ExecutionPhase.EXECUTING)
+    	{
+    		//jobs which are completing or executing return 0, also jobs which have been removed.
+    		return 0;
+    	}
+    	Iterator<UWSJob> jobList = 
+    			((PriorityQueueExecutionManager) uwsJob.getJobList().getExecutionManager()).getQueuedJobs();
+
+    	int count = 1;
+    	
+    	while(jobList.hasNext())
+    	{
+    		UWSJob job = jobList.next();
+    		if(job == uwsJob)
+    		{
+    			break;
+    		}
+    		else
+    		{
+    			if(!job.isFinished())
+    			{
+        			count++;
+    			}
+    		}
+    	}
+    	
+		return count;
+    }
+
 
     /**
      * Create and store a new DataAccessJob for the access request. Will associate the data access job record with the
@@ -400,7 +558,8 @@ public class AccessJobManager
         dataAccessJob.setCreatedTimestamp(now);
         dataAccessJob.setLastModified(now);
         dataAccessJob.setRequestId(UUID.randomUUID().toString());
-        dataAccessJob.setStatus(DataAccessJobStatus.PREPARING);
+		dataAccessJob.setStatus(DataAccessJobStatus.PREPARING);
+        casdaMailService.sendEmail(dataAccessJob, CasdaMailService.CREATED_EMAIL, CasdaMailService.CREATED_EMAIL_SUBJECT);   
         dataAccessJob = dataAccessJobRepository.save(dataAccessJob);
 
         logger.info("{}", CasdaDataAccessEvents.E037.messageBuilder().add(dataAccessJob.getDownloadMode())
@@ -425,6 +584,12 @@ public class AccessJobManager
      */
     private DataAccessJob createDataAccessProducts(String[] ids, DataAccessJob dataAccessJob, Long sizeLimit)
     {
+        if (dataAccessJob.getParamMap().get("format") != null)
+        {
+            dataAccessJob.setDownloadFormat(
+                    ImageFormat.findMatchingFormat(dataAccessJob.getParamMap().get("format")[0]).getFileExtension());
+        }
+        List<String> paramsWithoutCutouts = new ArrayList<>();
         long fileSizeKb = 0l;
         if (ids != null)
         {
@@ -434,20 +599,41 @@ public class AccessJobManager
                 switch (dataAccessProduct.getDataAccessProductType())
                 {
                 case cube:
-                    if (DataAccessUtil.imageCutoutsShouldBeCreated(dataAccessJob))
+                    if (DataAccessUtil.imageCutoutsShouldBeCreated(dataAccessJob, dataLinkAccessSecretKey))
                     {
-                        fileSizeKb += addImageCutouts(dataAccessJob, dataAccessProduct, dataAccessJob.getParamMap());
+                        fileSizeKb += addImageCutouts(dataAccessJob, dataAccessProduct, dataAccessJob.getParamMap(),
+                                paramsWithoutCutouts);
+                    }
+                    else if (DataAccessUtil.spectrumShouldBeCreated(dataAccessJob, dataLinkAccessSecretKey))
+                    {
+                        fileSizeKb += addGeneratedSpectra(dataAccessJob, dataAccessProduct, dataAccessJob.getParamMap(),
+                                paramsWithoutCutouts);
                     }
                     else
                     {
                         fileSizeKb += addImageCube(dataAccessJob, dataAccessProduct);
                     }
                     break;
+                case spectrum:
+                    fileSizeKb += addSpectrum(dataAccessJob, dataAccessProduct);
+                    break;
+                case moment_map:
+                    fileSizeKb += addMomentMap(dataAccessJob, dataAccessProduct);
+                    break;
+                case cubelet:
+                    fileSizeKb += addCubelet(dataAccessJob, dataAccessProduct);
+                    break;
                 case visibility:
                     fileSizeKb += addMeasurementSet(dataAccessJob, dataAccessProduct);
                     break;
                 case catalogue:
                     addCatalogue(dataAccessJob, dataAccessProduct);
+                    break;
+                case encap:
+                	addEncapsulationFile(dataAccessJob, dataAccessProduct);
+                	break;
+                case evaluation:
+                    fileSizeKb += addEvaluationFile(dataAccessJob, dataAccessProduct);
                     break;
                 default:
                     throw new IllegalArgumentException(
@@ -456,6 +642,10 @@ public class AccessJobManager
             }
         }
         dataAccessJob.setSizeKb(fileSizeKb);
+        for (String unmatchedParamCombo : paramsWithoutCutouts)
+        {
+            addErrorFile(dataAccessJob, unmatchedParamCombo);
+        }
 
         logger.debug("Size {} limit {}", fileSizeKb, sizeLimit);
 
@@ -468,6 +658,13 @@ public class AccessJobManager
         }
 
         return dataAccessJob;
+    }
+
+    private void addErrorFile(DataAccessJob dataAccessJob, String unmatchedParamCombo)
+    {
+        String message = "UsageError: No data is available for the parameter combination: " + unmatchedParamCombo;
+        
+        dataAccessJob.addError(message);
     }
 
     /**
@@ -700,7 +897,15 @@ public class AccessJobManager
             if (isSlurmJobSafeToKill(cachedFile))
             {                
                 slurmJobManager.cancelJob(cachedFile.getDownloadJobId());
-                cacheManager.clearCacheIfPossible(cachedFile);
+                try
+                {
+                    cacheManager.clearCacheIfPossible(cachedFile);
+                }
+                catch (CacheException e)
+                {
+                    logger.error("Failed to delete cache file " + file.getFileId(),
+                            CasdaLogMessageBuilderFactory.getCasdaMessageBuilder(LogEvent.UNKNOWN_EVENT).toString(), e);
+                }
             }
         }
     }
@@ -759,22 +964,17 @@ public class AccessJobManager
     /**
      * Find out whether the given job is pausable.
      * 
-     * @param requestId
-     *            the request id (DataAccessJob table)
+     * @param dataAccessJob
+     *            the DataAccessJob
      * @return true if the job is pausable
      * @throws ResourceNotFoundException
      *             if the job could not be found
      */
-    public boolean isPausable(String requestId) throws ResourceNotFoundException
+    public boolean isPausable(DataAccessJob dataAccessJob) throws ResourceNotFoundException
     {
-        DataAccessJob dataAccessJob = dataAccessJobRepository.findByRequestId(requestId);
-        if (dataAccessJob == null)
-        {
-            throw new ResourceNotFoundException("Job with requestId '" + requestId + "' could not be found");
-        }
-
-        return !IMMEDIATE_JOB_LIST_NAME.equals(getJobList(dataAccessJob).getName()) && EnumSet
-                .of(ExecutionPhase.PENDING, ExecutionPhase.QUEUED).contains(getJobStatus(requestId).getPhase());
+        return !IMMEDIATE_JOB_LIST_NAME.equals(getJobList(dataAccessJob).getName()) && EnumSet.of(
+        		ExecutionPhase.PENDING, ExecutionPhase.QUEUED)
+        		.contains(getJobStatus(dataAccessJob).getPhase());
     }
 
     /**
@@ -802,7 +1002,12 @@ public class AccessJobManager
         {
             throw new ResourceNotFoundException("Job with requestId '" + requestId + "' could not be found");
         }
-
+        cancelJob(dataAccessJob, expiryTime);
+    }
+    
+    private void cancelJob(DataAccessJob dataAccessJob, DateTime expiryTime)
+            throws ResourceIllegalStateException, ResourceNotFoundException
+    {
         /*
          * We try to abort the job regardless of the state of the DataAccessJob. This is because the job is running on
          * its own thread and potentially updating the state of the DataAccessJob. The state of the returned UWSJob will
@@ -811,17 +1016,48 @@ public class AccessJobManager
         UWSJob uwsJob = tryAbortJob(dataAccessJob.getRequestId());
         if (uwsJob != null && !UWS_JOB_FINISHED_EXECUTION_PHASES.contains(uwsJob.getPhase()))
         {
-            throw new ResourceIllegalStateException("Job with requestId '" + requestId
+            throw new ResourceIllegalStateException("Job with requestId '" + dataAccessJob.getRequestId()
                     + "' cannot be cancelled at this time as it is still in phase '" + uwsJob.getPhase() + "'");
         }
         dataAccessJob.setExpiredTimestamp(expiryTime);
         dataAccessJob.setStatus(DataAccessJobStatus.CANCELLED);
         dataAccessJobRepository.save(dataAccessJob);
-        Collection<DownloadFile> files = DataAccessUtil.getDataAccessJobDownloadFiles(dataAccessJob,
-                cacheManager.getJobDirectory(dataAccessJob));
-        cacheManager.updateUnlockForFiles(files, expiryTime);
-                
-        killSlurmJobsWherePossible(files, dataAccessJob);
+        
+        List<Map<FileType, Integer[]>> paging = dataAccessService.getPaging(dataAccessJob.getRequestId(), false);
+        
+        for(int pageNum = 0; pageNum < paging.size(); pageNum++)
+        {
+        	List<DownloadFile> files = dataAccessService.getPageOfFiles(paging.get(pageNum), dataAccessJob);
+            cacheManager.updateUnlockForFiles(files, expiryTime);
+            killSlurmJobsWherePossible(files, dataAccessJob);
+        }
+    }
+
+    /**
+     * Delete all cache. This includes killing all the running slurm jobs and marking all paused and preparing jobs to
+     * expired and delete cache file and data files from the disk
+     * 
+     * @throws CacheException if cahced item cannot be found or is in an illegal state
+     */
+    @Transactional
+    public void deleteAllCache() throws CacheException
+    {
+        List<DataAccessJob> runningJobs = dataAccessJobRepository.findPreparingJobs();        
+        runningJobs.addAll(dataAccessJobRepository.findPausedJobs());
+        DateTime now = new DateTime();
+        for (DataAccessJob dataAccessJob : runningJobs)
+        {
+            try
+            {
+                cancelJob(dataAccessJob, now);
+            }
+            catch (ResourceIllegalStateException | ResourceNotFoundException e)
+            {
+                throw new CacheException(e);
+            }
+        }
+        dataAccessJobRepository.expireAllJobs();
+        cacheManager.deleteAllCache();
     }
 
     /**
@@ -845,7 +1081,7 @@ public class AccessJobManager
             throw new ResourceNotFoundException("Job with requestId '" + requestId + "' could not be found");
         }
 
-        UWSJob job = getJobStatus(requestId);
+        UWSJob job = getJobStatus(dataAccessJob);
         if (ExecutionPhase.PENDING != job.getPhase())
         {
             throw new ResourceIllegalStateException("Job with requestId '" + requestId
@@ -860,10 +1096,11 @@ public class AccessJobManager
         Map<String, Object> paramMap = assembleJobParams(dataAccessJob);
 
         JobList jobList = getJobList(dataAccessJob);
-        if (dataAccessJob.getDownloadMode() == CasdaDownloadMode.SIAP_SYNC
-                && !IMMEDIATE_JOB_LIST_NAME.equals(jobList.getName()))
+        if (Utils.SYNC_DOWNLOADS.contains(dataAccessJob.getDownloadMode())
+                && !(IMMEDIATE_JOB_LIST_NAME.equals(jobList.getName())
+                        || CATEGORY_A_JOB_LIST_NAME.equals(jobList.getName())))
         {
-            throw new ScheduleJobException("Not all files for the sync job are available in the cache.");
+            throw new ScheduleJobException("Some of the requested files are large and not currently available.");
         }
 
         executeUWSJob(paramMap, jobList);
@@ -1077,24 +1314,6 @@ public class AccessJobManager
         uws.getBackupManager().restoreAll();
     }
 
-    // TODO: Remove if the corresponding residual test cases are removed
-    void setCategoryAJobList(JobList jobList)
-    {
-        this.categoryAJobList = jobList;
-    }
-
-    // TODO: Remove if the corresponding residual test cases are removed
-    void setCategoryBJobList(JobList jobList)
-    {
-        this.categoryBJobList = jobList;
-    }
-
-    // TODO: Remove if the corresponding residual test cases are removed
-    void setImmediateJobList(JobList jobList)
-    {
-        this.immediateJobList = jobList;
-    }
-
     /**
      * Gets the uws queue with this name
      * 
@@ -1244,21 +1463,22 @@ public class AccessJobManager
     }
 
     private long addImageCutouts(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct,
-            ParamMap dataAccessJobParams)
+            ParamMap dataAccessJobParams, List<String> paramsWithoutCutouts)
     {
         long fileSizeKb = 0;
         ImageCube ic = imageCubeRepository.findOne(dataAccessProduct.getId());
         // ignore missing for now - selected from screen usually
         if (ic != null)
         {
-            List<CutoutBounds> cutoutBounds = cutoutService.calcCutoutBounds(dataAccessJobParams, ic);
-            for (CutoutBounds cutoutBound : cutoutBounds)
+            List<GeneratedFileBounds> cutoutBounds = generateFileService.calcGeneratedFileBounds(dataAccessJobParams, 
+            		ic, dataAccessProduct.getDataProductId(), paramsWithoutCutouts);
+            for (GeneratedFileBounds cutoutBound : cutoutBounds)
             {
                 ImageCutout cutout = new ImageCutout();
                 cutout.setImageCube(ic);
                 cutout.setBounds(cutoutBound.toString());
 
-                List<ImageCubeAxis> imageCubeAxes = cutoutService.getAxisList(ic);
+                List<ImageCubeAxis> imageCubeAxes = generateFileService.getAxisList(ic);
                 ImageCubeAxis imageCubeAxis = imageCubeAxes.isEmpty() ? null : imageCubeAxes.get(0);
                 // estimate file size
                 double sizeOneLayer = imageCubeAxis == null
@@ -1271,6 +1491,44 @@ public class AccessJobManager
                 dataAccessJob.addImageCutout(cutout);
                 fileSizeKb = cutout.getFilesize();
             }
+        }
+        else
+        {
+            logger.error(CasdaDataAccessEvents.E100.messageBuilder().add("image_cube").add(dataAccessProduct.getId())
+                    .toString());
+        }
+        return fileSizeKb;
+    }
+    
+    private long addGeneratedSpectra(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct,
+            ParamMap dataAccessJobParams, List<String> paramsWithoutSpectra)
+    {
+        long fileSizeKb = 0;
+        ImageCube ic = imageCubeRepository.findOne(dataAccessProduct.getId());
+        // ignore missing for now - selected from screen usually
+        if (ic != null)
+        {
+        	 List<GeneratedFileBounds> spectraBounds = generateFileService.calcGeneratedFileBounds(dataAccessJobParams, 
+             		ic, dataAccessProduct.getDataProductId(), paramsWithoutSpectra);
+             for (GeneratedFileBounds spectraBound : spectraBounds)
+             {
+                 GeneratedSpectrum spectrum = new GeneratedSpectrum();
+                 spectrum.setImageCube(ic);
+                 spectrum.setBounds(spectraBound.toString());
+
+                 List<ImageCubeAxis> imageCubeAxes = generateFileService.getAxisList(ic);
+                 ImageCubeAxis imageCubeAxis = imageCubeAxes.isEmpty() ? null : imageCubeAxes.get(0);
+                 // estimate file size
+                 double sizeOneLayer = imageCubeAxis == null
+                         ? (double) ic.getFilesize() : ((double) ic.getFilesize()) / ((double) 
+                                 imageCubeAxis.getSize() * imageCubeAxis.getPlaneSpan());
+                 final double percentageOfOriginal = spectraBound.calculateFovEstimate() / ((double) ic.getSFov());
+                 int numPlanes = spectraBound.getNumPlanes();
+                 spectrum.setFilesize(Math.round(Math.min(percentageOfOriginal, 1) * sizeOneLayer * numPlanes));
+
+                 dataAccessJob.addGeneratedSpectrum(spectrum);
+                 fileSizeKb = spectrum.getFilesize();
+             }
         }
         else
         {
@@ -1298,6 +1556,101 @@ public class AccessJobManager
         }
         return fileSizeKb;
     }
+    
+    private long addEncapsulationFile(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct)
+    {
+        long fileSizeKb = 0;
+
+        EncapsulationFile encapFile = encapsulationFileRepository.findOne(dataAccessProduct.getId());
+        // ignore missing for now - selected from screen usually
+        if (encapFile != null)
+        {
+            dataAccessJob.addEncapsulationFile(encapFile);
+            fileSizeKb = encapFile.getFilesize();
+        }
+        else
+        {
+            logger.error(CasdaDataAccessEvents.E100.messageBuilder().add("encapsulation_file")
+                    .add(dataAccessProduct.getId()).toString());
+        }
+        return fileSizeKb;
+    }
+    
+    private long addEvaluationFile(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct)
+    {
+        long fileSizeKb = 0;
+
+        EvaluationFile evaluationFile = evaluationFileRepository.findOne(dataAccessProduct.getId());
+        // ignore missing for now - selected from screen usually
+        if (evaluationFile != null)
+        {
+            dataAccessJob.addEvaluationFile(evaluationFile);
+            fileSizeKb = evaluationFile.getFilesize();
+        }
+        else
+        {
+            logger.error(CasdaDataAccessEvents.E100.messageBuilder().add("evaluation_file")
+                    .add(dataAccessProduct.getId()).toString());
+        }
+        return fileSizeKb;
+    }
+    
+    private long addSpectrum(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct)
+    {
+        long fileSizeKb = 0;
+
+        Spectrum spectrum = spectrumRepository.findOne(dataAccessProduct.getId());
+        // ignore missing for now - selected from screen usually
+        if (spectrum != null)
+        {
+            dataAccessJob.addSpectrum(spectrum);
+            fileSizeKb = spectrum.getFilesize();
+        }
+        else
+        {
+            logger.error(CasdaDataAccessEvents.E100.messageBuilder().add("spectrum")
+                    .add(dataAccessProduct.getId()).toString());
+        }
+        return fileSizeKb;
+    }
+    
+    private long addMomentMap(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct)
+    {
+        long fileSizeKb = 0;
+
+        MomentMap momentmap = momentMapRepository.findOne(dataAccessProduct.getId());
+        // ignore missing for now - selected from screen usually
+        if (momentmap != null)
+        {
+            dataAccessJob.addMomentMap(momentmap);
+            fileSizeKb = momentmap.getFilesize();
+        }
+        else
+        {
+            logger.error(CasdaDataAccessEvents.E100.messageBuilder().add("moment_map")
+                    .add(dataAccessProduct.getId()).toString());
+        }
+        return fileSizeKb;
+    }
+    
+    private long addCubelet(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct)
+    {
+        long fileSizeKb = 0;
+
+        Cubelet cubelet = cubeletRepository.findOne(dataAccessProduct.getId());
+        // ignore missing for now - selected from screen usually
+        if (cubelet != null)
+        {
+            dataAccessJob.addCubelet(cubelet);
+            fileSizeKb = cubelet.getFilesize();
+        }
+        else
+        {
+            logger.error(CasdaDataAccessEvents.E100.messageBuilder().add("cubelet")
+                    .add(dataAccessProduct.getId()).toString());
+        }
+        return fileSizeKb;
+    }
 
     private void addCatalogue(DataAccessJob dataAccessJob, DataAccessDataProduct dataAccessProduct)
     {
@@ -1319,20 +1672,14 @@ public class AccessJobManager
      * Returns the status of a job as a UWSJob record. Please note that the returned record is an independent object
      * from any particular implementation of 'job running'. Returns a UWSJob representation of a DataAccessJob.
      * 
-     * @param requestId
-     *            the request id (DataAccessJob table)
+     * @param dataAccessJob
+     *            the DataAccessJob
      * @return a UWSJob representation of the given job
      * @throws ResourceNotFoundException
      *             if the job could not be found
      */
-    public UWSJob getJobStatus(String requestId) throws ResourceNotFoundException
+    public UWSJob getJobStatus(DataAccessJob dataAccessJob) throws ResourceNotFoundException
     {
-        DataAccessJob dataAccessJob = dataAccessJobRepository.findByRequestId(requestId);
-        if (dataAccessJob == null)
-        {
-            throw new ResourceNotFoundException("Job with requestId '" + requestId + "' could not be found");
-        }
-
         /*
          * Force a reload of the DataAccessJob to ensure it is the most up-to-date value in the database.
          */
@@ -1393,49 +1740,172 @@ public class AccessJobManager
          */
         if (phase == ExecutionPhase.COMPLETED)
         {
-            for (ImageCube imageCube : dataAccessJob.getImageCubes())
-            {
-                results.add(new Result(DataAccessProductType.cube + "-" + imageCube.getId(), XLINK_SIMPLE_TYPE,
-                        fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFile(
-                                dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), imageCube.getFileId()),
-                        false));
-                results.add(new Result(DataAccessProductType.cube + "-" + imageCube.getId() + ".checksum",
-                        XLINK_SIMPLE_TYPE,
-                        fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFileChecksum(
-                                dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), imageCube.getFileId()),
-                        false));
-            }
-            for (ImageCutout cutout : dataAccessJob.getImageCutouts())
-            {
-                String cutoutId = "cutout-" + cutout.getId();
-                results.add(new Result(cutoutId, XLINK_SIMPLE_TYPE,
-                        fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFile(
-                                dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), cutout.getFileId()),
-                        false));
-                results.add(new Result(cutoutId + ".checksum",
-                        XLINK_SIMPLE_TYPE,
-                        fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFileChecksum(
-                                dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), cutout.getFileId()),
-                        false));
-            }
-            for (MeasurementSet measurementSet : dataAccessJob.getMeasurementSets())
-            {
-                results.add(
-                        new Result(
-                                DataAccessProductType.visibility + "-"
-                                        + measurementSet.getId(),
-                                XLINK_SIMPLE_TYPE,
-                                fileDownloadBaseUrl + "/"
-                                        + DataAccessUtil.getRelativeLinkForFile(dataAccessJob.getDownloadMode(),
-                                                dataAccessJob.getRequestId(), measurementSet.getFileId()),
-                                false));
-                results.add(new Result(DataAccessProductType.visibility + "-" + measurementSet.getId() + ".checksum",
-                        XLINK_SIMPLE_TYPE,
-                        fileDownloadBaseUrl + "/"
-                                + DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob.getDownloadMode(),
-                                        dataAccessJob.getRequestId(), measurementSet.getFileId()),
-                        false));
-            }
+        	List<Map<FileType, Integer[]>> paging = dataAccessService.getPaging(dataAccessJob.getRequestId(), false);
+        	for(int pageNum = 0; pageNum < paging.size(); pageNum++)
+        	{
+
+            	Collection<DownloadFile> downloadFiles = 
+            			dataAccessService.getPageOfFiles(paging.get(pageNum), dataAccessJob);
+            	
+            	for(DownloadFile file : downloadFiles)
+            	{
+            		switch(file.getFileType())
+            		{
+            			case IMAGE_CUBE:
+                            results.add(new Result(DataAccessProductType.cube + "-" + file.getId(), XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFile(
+                                    		dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), 
+                                    		file.getFileId()),false));
+                            results.add(new Result(DataAccessProductType.cube + "-" + file.getId() + ".checksum",
+                                    XLINK_SIMPLE_TYPE, fileDownloadBaseUrl + "/" + 
+                                    		DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob
+                                    				.getDownloadMode(), dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case MEASUREMENT_SET:
+                            results.add(new Result(
+                                            DataAccessProductType.visibility + "-"
+                                                    + file.getId(),
+                                            XLINK_SIMPLE_TYPE,
+                                            fileDownloadBaseUrl + "/"
+                                                    + DataAccessUtil.getRelativeLinkForFile(dataAccessJob.getDownloadMode(),
+                                                            dataAccessJob.getRequestId(), file.getFileId()),
+                                            false));
+                            results.add(new Result(DataAccessProductType.visibility + "-" + file.getId() + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/"
+                                            + DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob.getDownloadMode(),
+                                                    dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case ENCAPSULATION_FILE:
+                            results.add(new Result(
+                                            DataAccessProductType.encap + "-"
+                                                    + file.getId(),
+                                            XLINK_SIMPLE_TYPE,
+                                            fileDownloadBaseUrl + "/"
+                                                    + DataAccessUtil.getRelativeLinkForFile(dataAccessJob.getDownloadMode(),
+                                                            dataAccessJob.getRequestId(), file.getFileId()),
+                                            false));
+                            results.add(new Result(DataAccessProductType.encap + "-" + file.getId() + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/"
+                                            + DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob.getDownloadMode(),
+                                                    dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case EVALUATION_FILE:
+                            results.add(new Result(
+                                            DataAccessProductType.encap + "-"
+                                                    + file.getId(),
+                                            XLINK_SIMPLE_TYPE,
+                                            fileDownloadBaseUrl + "/"
+                                                    + DataAccessUtil.getRelativeLinkForFile(dataAccessJob.getDownloadMode(),
+                                                            dataAccessJob.getRequestId(), file.getFileId()),
+                                            false));
+                            results.add(new Result(DataAccessProductType.encap + "-" + file.getId() + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/"
+                                            + DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob.getDownloadMode(),
+                                                    dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+                            break;
+            			case SPECTRUM:
+                            results.add(
+                                    new Result(
+                                            DataAccessProductType.spectrum + "-"
+                                                    + file.getId(),
+                                            XLINK_SIMPLE_TYPE,
+                                            fileDownloadBaseUrl + "/"
+                                                    + DataAccessUtil.getRelativeLinkForFile(dataAccessJob.getDownloadMode(),
+                                                            dataAccessJob.getRequestId(), file.getFileId()),
+                                            false));
+                            results.add(new Result(DataAccessProductType.spectrum + "-" + file.getId() + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/"
+                                            + DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob.getDownloadMode(),
+                                                    dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case MOMENT_MAP:
+                            results.add(
+                                    new Result(
+                                            DataAccessProductType.moment_map + "-"
+                                                    + file.getId(),
+                                            XLINK_SIMPLE_TYPE,
+                                            fileDownloadBaseUrl + "/"
+                                                    + DataAccessUtil.getRelativeLinkForFile(dataAccessJob.getDownloadMode(),
+                                                            dataAccessJob.getRequestId(), file.getFileId()),
+                                            false));
+                            results.add(new Result(DataAccessProductType.moment_map + "-" + file.getId() + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/"
+                                            + DataAccessUtil.getRelativeLinkForFileChecksum(dataAccessJob.getDownloadMode(),
+                                                    dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case CUBELET:
+                                results.add(
+                                        new Result(
+                                                DataAccessProductType.cubelet + "-"
+                                                        + file.getId(),
+                                                XLINK_SIMPLE_TYPE,
+                                                fileDownloadBaseUrl + "/"
+                                                        + DataAccessUtil.getRelativeLinkForFile(
+                                                        		dataAccessJob.getDownloadMode(),
+                                                                dataAccessJob.getRequestId(), file.getFileId()),
+                                                false));
+                                results.add(new Result(DataAccessProductType.cubelet + "-" + file.getId() + ".checksum",
+                                        XLINK_SIMPLE_TYPE,
+                                        fileDownloadBaseUrl + "/"
+                                                + DataAccessUtil.getRelativeLinkForFileChecksum(
+                                                		dataAccessJob.getDownloadMode(),
+                                                        dataAccessJob.getRequestId(), file.getFileId()),
+                                        false));
+                				break;
+            			case GENERATED_SPECTRUM:
+                            String specId = "spectrum-" + file.getId() + "-image_cube" + 
+                            			((GeneratedFileDescriptor)file).getImageCubeId();
+                            results.add(new Result(specId, XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFile(
+                                            dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+                            results.add(new Result(specId + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFileChecksum(
+                                            dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case IMAGE_CUTOUT:
+                            String cutoutId = "cutout-" + file.getId();
+                            results.add(new Result(cutoutId, XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFile(
+                                            dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+                            results.add(new Result(cutoutId + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFileChecksum(
+                                            dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), file.getFileId()),
+                                    false));
+            				break;
+            			case ERROR:
+                            String error_id = String.format("error-%02d", file.getId());
+                            results.add(new Result(error_id, XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFile(
+                                    dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), file.getId()+".txt"),
+                                    false));
+                            results.add(new Result(error_id + ".checksum",
+                                    XLINK_SIMPLE_TYPE,
+                                    fileDownloadBaseUrl + "/" + DataAccessUtil.getRelativeLinkForFileChecksum(
+                                    dataAccessJob.getDownloadMode(), dataAccessJob.getRequestId(), file.getId()+".txt"),
+                                    false));
+            				break;
+            			default:
+            				break;
+            		}
+            	}
+        	}
+
         }
 
         return createUWSJob(dataAccessJob.getRequestId(), phase, startTime, endTime,

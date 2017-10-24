@@ -36,9 +36,9 @@ public class TestAccessUwsFactory extends AccessUwsFactory
         private Semaphore jobEnded = new Semaphore(0);
 
         private NotifyingDataAccessThread(UWSJob uwsJob, DataAccessService dataAccessService, Packager packager,
-                int hoursToExpiryDefault, int hoursToExpirySiapSync) throws UWSException
+                int hoursToExpiryDefault, int hoursToExpirySodaSync) throws UWSException
         {
-            super(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySiapSync);
+            super(uwsJob, dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySodaSync, "");
         }
 
         @Override
@@ -117,13 +117,13 @@ public class TestAccessUwsFactory extends AccessUwsFactory
      *            The packager instance which will be doing the work for each job.
      * @param hoursToExpiryDefault
      *            the default number of hours until a job will expire
-     * @param hoursToExpirySiapSync
+     * @param hoursToExpirySodaSync
      *            the number of hours to expiry for a SIAP sync job
      */
     public TestAccessUwsFactory(DataAccessService dataAccessService, Packager packager, int hoursToExpiryDefault,
-            int hoursToExpirySiapSync)
+            int hoursToExpirySodaSync)
     {
-        super(dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySiapSync);
+        super(dataAccessService, packager, hoursToExpiryDefault, hoursToExpirySodaSync, "");
     }
 
     private ArrayList<TestAccessUwsFactory.NotifyingDataAccessThread> jobThreads = new ArrayList<>();
@@ -132,7 +132,7 @@ public class TestAccessUwsFactory extends AccessUwsFactory
     public JobThread createJobThread(UWSJob jobDescription) throws UWSException
     {
         TestAccessUwsFactory.NotifyingDataAccessThread myJobThread = new NotifyingDataAccessThread(jobDescription,
-                this.dataAccessService, this.packager, this.hoursToExpiryDefault, this.hoursToExpirySiapSync);
+                this.dataAccessService, this.packager, this.hoursToExpiryDefault, this.hoursToExpirySodaSync);
         jobThreads.add(myJobThread);
         return myJobThread;
     }

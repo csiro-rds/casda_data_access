@@ -15,7 +15,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.commons.io.FileUtils;
 import org.joda.time.DateTime;
@@ -39,10 +41,7 @@ import au.csiro.casda.access.jpa.TapTableRepository;
 import au.csiro.casda.access.security.SecuredRestTemplate;
 import au.csiro.casda.access.services.InlineScriptService;
 import au.csiro.casda.entity.TapTableExtract;
-import au.csiro.casda.entity.observation.Catalogue;
 import au.csiro.casda.entity.observation.CatalogueType;
-import au.csiro.casda.entity.observation.Observation;
-import au.csiro.casda.entity.observation.Project;
 
 /*
  * #%L
@@ -102,7 +101,8 @@ public class VoToolsCataloguePackagerTest
     {
         MockitoAnnotations.initMocks(this);
 
-        SecuredRestTemplate restTemplate = new SecuredRestTemplate();
+        SecuredRestTemplate restTemplate = 
+        		new SecuredRestTemplate(SecuredRestTemplate.DEFAULT_RESTTEMPLATE_CONNECT_TIMEOUT);
         mockServer = MockRestServiceServer.createServer(restTemplate);
 
         tempDir = tempFolder.newFolder("CatTest").getAbsolutePath();
@@ -119,18 +119,14 @@ public class VoToolsCataloguePackagerTest
          tempFolder.delete();
     }
 
-    private Catalogue createCatalogue()
+    private Map<String, Object> createCatalogue()
     {
-        Catalogue cat = new Catalogue();
-        cat.setId(1l);
-        Project project = new Project();
-        project.setId(1l);
-        project.setOpalCode("AS007");
-        cat.setProject(project);
-        cat.setCatalogueType(CatalogueType.CONTINUUM_COMPONENT);
-        cat.setParent(new Observation(11111));
-
-        return cat;
+    	Map<String, Object> catalogue = new  HashMap<String, Object>();
+    	catalogue.put(DataAccessUtil.ID, 1L);
+    	catalogue.put(DataAccessUtil.PROJECT_ID, "AS031");
+    	catalogue.put(DataAccessUtil.CATALOGUE_TYPE, CatalogueType.CONTINUUM_COMPONENT.name());
+    	catalogue.put(DataAccessUtil.OBSERVATION_ID,11111);
+        return catalogue;
     }
 
     @Test
@@ -146,15 +142,15 @@ public class VoToolsCataloguePackagerTest
         mockServer.expect(requestTo(voUri)).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(xmlResponse, MediaType.APPLICATION_XHTML_XML));
 
-        Catalogue cat = createCatalogue();
+        Map<String, Object> cat = createCatalogue();
         String fileName =
                 DataAccessUtil.getIndividualCatalogueFilename(cat, CatalogueDownloadFormat.VOTABLE_INDIVIDUAL);
         CatalogueDownloadFile catalogueDownloadFile = new CatalogueDownloadFile();
-        catalogueDownloadFile.setCatalogueType(cat.getCatalogueType());
+        catalogueDownloadFile.setCatalogueType(CatalogueType.valueOf((String)cat.get(DataAccessUtil.CATALOGUE_TYPE)));
         catalogueDownloadFile.setDownloadFormat(CatalogueDownloadFormat.VOTABLE_INDIVIDUAL);
         catalogueDownloadFile.setFilename(fileName);
         catalogueDownloadFile.setFileId("1001-" + fileName);
-        catalogueDownloadFile.getCatalogueIds().add(cat.getId());
+        catalogueDownloadFile.getCatalogueIds().add((Long)cat.get(DataAccessUtil.ID));
         DateTime unlock = DateTime.now(DateTimeZone.UTC).plusHours(HOURS_TO_EXPIRY);
 
         cataloguePackager.generateCatalogueAndChecksumFile(new File(tempDir + "/jobs/1001"), catalogueDownloadFile,
@@ -183,14 +179,14 @@ public class VoToolsCataloguePackagerTest
         mockServer.expect(requestTo(csvUri)).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(csvResponse, MediaType.TEXT_PLAIN));
 
-        Catalogue cat = createCatalogue();
+        Map<String, Object> cat = createCatalogue();
         String fileName = DataAccessUtil.getIndividualCatalogueFilename(cat, CatalogueDownloadFormat.CSV_INDIVIDUAL);
         CatalogueDownloadFile catalogueDownloadFile = new CatalogueDownloadFile();
-        catalogueDownloadFile.setCatalogueType(cat.getCatalogueType());
+        catalogueDownloadFile.setCatalogueType(CatalogueType.valueOf((String)cat.get(DataAccessUtil.CATALOGUE_TYPE)));
         catalogueDownloadFile.setDownloadFormat(CatalogueDownloadFormat.CSV_INDIVIDUAL);
         catalogueDownloadFile.setFilename(fileName);
         catalogueDownloadFile.setFileId("1001-" + fileName);
-        catalogueDownloadFile.getCatalogueIds().add(cat.getId());
+        catalogueDownloadFile.getCatalogueIds().add((Long)cat.get(DataAccessUtil.ID));
         DateTime unlock = DateTime.now(DateTimeZone.UTC).plusHours(HOURS_TO_EXPIRY);
 
         cataloguePackager.generateCatalogueAndChecksumFile(new File(tempDir + "/jobs/1002"), catalogueDownloadFile,
@@ -275,11 +271,11 @@ public class VoToolsCataloguePackagerTest
         when(tapTableRepository.findByTapTable("casda", "table_name")).thenReturn(
                 new TapTableExtract("somethingelse", "tapschema.taptablename", "casda", "table_name"));
         String level7QueryResult =
-                cataloguePackager.createTapQuery(ids, CatalogueType.LEVEL7, "casda.table_name", false);
+                cataloguePackager.createTapQuery(ids, CatalogueType.DERIVED_CATALOGUE, "casda.table_name", false);
         assertEquals(expectedLevel7Query, level7QueryResult);
         
         String level7CountQueryResult =
-                cataloguePackager.createTapQuery(ids, CatalogueType.LEVEL7, "casda.table_name", true);
+                cataloguePackager.createTapQuery(ids, CatalogueType.DERIVED_CATALOGUE, "casda.table_name", true);
         assertEquals(expectedLevel7CountQuery, level7CountQueryResult);
     }
 
@@ -312,9 +308,9 @@ public class VoToolsCataloguePackagerTest
         mockServer.expect(requestTo(countUri)).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(countResponse, MediaType.TEXT_PLAIN));
 
-        Catalogue catalogue = createCatalogue();
+        Map<String, Object> catalogue = createCatalogue();
         CatalogueDownloadFile downloadFile = new CatalogueDownloadFile();
-        downloadFile.setCatalogueType(catalogue.getCatalogueType());
+        downloadFile.setCatalogueType(CatalogueType.valueOf((String)catalogue.get(DataAccessUtil.CATALOGUE_TYPE)));
         downloadFile.setDownloadFormat(CatalogueDownloadFormat.CSV_INDIVIDUAL);
         downloadFile.setFileId("1003-filename");
         downloadFile.setFilename("filename");
@@ -334,9 +330,9 @@ public class VoToolsCataloguePackagerTest
         mockServer.expect(requestTo(countUri)).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(countResponse, MediaType.TEXT_PLAIN));
 
-        Catalogue catalogue = createCatalogue();
+        Map<String, Object> catalogue = createCatalogue();
         CatalogueDownloadFile downloadFile = new CatalogueDownloadFile();
-        downloadFile.setCatalogueType(catalogue.getCatalogueType());
+        downloadFile.setCatalogueType(CatalogueType.valueOf((String)catalogue.get(DataAccessUtil.CATALOGUE_TYPE)));
         downloadFile.setDownloadFormat(CatalogueDownloadFormat.VOTABLE_GROUPED);
         downloadFile.setFileId("1004-filename");
         downloadFile.setFilename("filename");

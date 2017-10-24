@@ -4,7 +4,6 @@ import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import au.csiro.casda.access.CasdaDataAccessEvents;
 import au.csiro.casda.access.DataAccessApplication;
 import au.csiro.casda.access.DataAccessUtil;
@@ -15,7 +14,7 @@ import au.csiro.casda.access.cache.Packager;
 import au.csiro.casda.access.rest.CatalogueRetrievalException;
 import au.csiro.casda.access.rest.CreateChecksumException;
 import au.csiro.casda.access.services.DataAccessService;
-import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
+import au.csiro.casda.access.util.Utils;
 import au.csiro.casda.entity.dataaccess.DataAccessJob;
 import au.csiro.casda.logging.CasdaLogMessageBuilderFactory;
 import au.csiro.casda.logging.CasdaLoggingSettings;
@@ -53,7 +52,8 @@ public class DataAccessThread extends JobThread
     private final DataAccessService dataAccessService;
     private final Packager packager;
     private final int hoursToExpiryDefault;
-    private final int hoursToExpirySiapSync;
+    private final int hoursToExpirySodaSync;
+    private final String siapSharedSecretKey;
 
     /**
      * Create a new DataAccessThread instance.
@@ -66,19 +66,22 @@ public class DataAccessThread extends JobThread
      *            The packager instance which will be doing the work.
      * @param hoursToExpiryDefault
      *            the default number of hours to expiry for a job
-     * @param hoursToExpirySiapSync
-     *            the number of hours to expiry for a SIAP sync job
+     * @param hoursToExpirySodaSync
+     *            the number of hours to expiry for a SODA sync job
+     * @param siapSharedSecretKey
+     *            the key for unencrypting the request token
      * @throws UWSException
      *             If the job thread cannot be created.
      */
     public DataAccessThread(UWSJob uwsJob, DataAccessService dataAccessService, Packager packager,
-            int hoursToExpiryDefault, int hoursToExpirySiapSync) throws UWSException
+            int hoursToExpiryDefault, int hoursToExpirySodaSync, String siapSharedSecretKey) throws UWSException
     {
         super(uwsJob);
         this.dataAccessService = dataAccessService;
         this.packager = packager;
         this.hoursToExpiryDefault = hoursToExpiryDefault;
-        this.hoursToExpirySiapSync = hoursToExpirySiapSync;
+        this.hoursToExpirySodaSync = hoursToExpirySodaSync;
+        this.siapSharedSecretKey = siapSharedSecretKey;
     }
 
     @Override
@@ -124,15 +127,20 @@ public class DataAccessThread extends JobThread
              * will have been essentially 'claimed' by the job and therefore won't be cleaned up as part of the usual
              * purging process.
              */
-            int hoursToExpiryForJob = dataAccessJob.getDownloadMode() == CasdaDownloadMode.SIAP_SYNC
-                    ? hoursToExpirySiapSync : hoursToExpiryDefault;
+            int hoursToExpiryForJob = Utils.SYNC_DOWNLOADS.contains(dataAccessJob.getDownloadMode())
+                    ? hoursToExpirySodaSync : hoursToExpiryDefault;
             dataAccessService.updateExpiryDate(id, DateTime.now(DateTimeZone.UTC).plusHours(hoursToExpiryForJob));
 
             logger.debug("Packaging files...");
-            if (dataAccessJob.getDownloadMode() == CasdaDownloadMode.SIAP_ASYNC && dataAccessJob.getFileCount() == 0)
+
+            Packager.Result packagerResult = packager.pack(dataAccessJob, hoursToExpiryForJob);
+            logger.debug("Successfully packaged files");
+
+            if (Utils.ASYNC_DOWNLOADS.contains(dataAccessJob.getDownloadMode())
+                    && dataAccessService.getFileCount(dataAccessJob.getRequestId()) == 0)
             {
                 String errorMessage;
-                if (DataAccessUtil.imageCutoutsShouldBeCreated(dataAccessJob))
+                if (DataAccessUtil.generatedFilesShouldBeCreated(dataAccessJob))
                 {
                     errorMessage = "UsageError: None of the selected image cubes had data matching the "
                             + "supplied cutout parameters.";
@@ -142,12 +150,10 @@ public class DataAccessThread extends JobThread
                     errorMessage = "UsageError: No data products were selected for retrieval.";
                 }
                 dataAccessJob.setErrorMessage(errorMessage);
+                dataAccessJob.setExpiredTimestamp(packagerResult.getExpiryDate());
                 dataAccessService.saveJob(dataAccessJob);
                 throw new IllegalStateException(errorMessage);
             }
-
-            Packager.Result packagerResult = packager.pack(dataAccessJob, hoursToExpiryForJob);
-            logger.debug("Successfully packaged files");
 
             /*
              * Update the job expriy date based on the time the packaging finished.
@@ -159,10 +165,27 @@ public class DataAccessThread extends JobThread
 
             long duration = System.currentTimeMillis() - start;
 
+            String accessType;
+
+            if(DataAccessUtil.imageCutoutsShouldBeCreated(dataAccessJob, siapSharedSecretKey))
+            {
+            	accessType ="Cutout";
+            }
+            else if(DataAccessUtil.spectrumShouldBeCreated(dataAccessJob, siapSharedSecretKey))
+            {
+            	accessType ="Generated Spectrum";
+            }
+            else
+            {
+            	accessType ="File";
+            }
+            
+            
             logger.info(CasdaDataAccessEvents.E039.messageBuilder().addTimeTaken(duration).add(id)
                     .add(packagerResult.getTotalSizeKb())
                     .add(packagerResult.getTotalSizeKb() - packagerResult.getCachedSizeKb())
-                    .add(packagerResult.getCachedSizeKb()).addCustomMessage("Finished UWS job " + job).toString());
+                    .add(packagerResult.getCachedSizeKb()).add(dataAccessJob.getDownloadMode().name()).add(accessType)
+                    .addCustomMessage("Finished UWS job " + job).toString());
 
             success = true;
         }
@@ -206,8 +229,8 @@ public class DataAccessThread extends JobThread
         {
             if (dataAccessJob != null)
             {
-                int hoursToExpiryForJob = dataAccessJob.getDownloadMode() == CasdaDownloadMode.SIAP_SYNC
-                        ? hoursToExpirySiapSync : hoursToExpiryDefault;
+                int hoursToExpiryForJob = Utils.SYNC_DOWNLOADS.contains(dataAccessJob.getDownloadMode())
+                        ? hoursToExpirySodaSync : hoursToExpiryDefault;
                 dataAccessService.markRequestError(id, DateTime.now(DateTimeZone.UTC).plusHours(hoursToExpiryForJob));
             }
             // If there is an error, encapsulate it in an UWSException so that an error summary can be published:

@@ -439,7 +439,7 @@ public class VoToolsCataloguePackager
 
         query.append("from ");
 
-        if (catalogueType == CatalogueType.LEVEL7)
+        if (catalogueType == CatalogueType.DERIVED_CATALOGUE)
         {
             // The level 7 catalogue record (in the catalogue table) stores the qualified database table
             // We need to translate this to the VO TAP schema and database so we can download the data from VO Tools.

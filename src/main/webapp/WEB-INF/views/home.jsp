@@ -16,6 +16,7 @@
 				<div class="floatLeft">
 				  <ul>
 					<li><a href="jobs">Job Queue</a></li>
+					<li><a href="queuedJobs">Processing Queue</a></li>
 					<li><a href="sdoc.jsp">API Documentation</a></li>
 				  </ul>
 				</div>

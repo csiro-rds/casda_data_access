@@ -28,6 +28,8 @@ import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import au.csiro.casda.access.cache.Packager;
+import au.csiro.casda.access.services.DataAccessService;
 import uws.job.ExecutionPhase;
 import uws.job.JobList;
 import uws.job.UWSJob;
@@ -35,8 +37,6 @@ import uws.job.parameters.UWSParameters;
 import uws.service.UWS;
 import uws.service.file.UWSFileManager;
 import uws.service.log.UWSLog;
-import au.csiro.casda.access.cache.Packager;
-import au.csiro.casda.access.services.DataAccessService;
 
 /*
  * #%L
@@ -93,7 +93,7 @@ public class DataAccessJobBackupManagerTest
         doReturn(jobList).when(uws).getJobList(AccessJobManager.CATEGORY_A_JOB_LIST_NAME);
         doReturn(jobListB).when(uws).getJobList(AccessJobManager.CATEGORY_B_JOB_LIST_NAME);
         doReturn(uwsLog).when(uws).getLogger();
-        doReturn(new AccessUwsFactory(mock(DataAccessService.class), mock(Packager.class), 12, 1)).when(uws)
+        doReturn(new AccessUwsFactory(mock(DataAccessService.class), mock(Packager.class), 12, 1, "")).when(uws)
                 .getFactory();
     }
 

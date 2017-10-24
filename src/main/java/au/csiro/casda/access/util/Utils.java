@@ -6,7 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
-
+import java.util.EnumSet;
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
@@ -15,6 +15,8 @@ import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.StringUtils;
+
+import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
 
 /**
  * Utilities class for Casda Data Access.
@@ -32,6 +34,19 @@ public class Utils
      */
     private static final String CRYPTO_CIPHER = "AES";
     private static final String CRYPTO_BYTE_ENCODING = "UTF-8";
+    
+    /** Constant enum list for web downloads */
+    public static final EnumSet<CasdaDownloadMode> WEB_DOWNLOADS = EnumSet.of(CasdaDownloadMode.WEB, 
+            CasdaDownloadMode.SODA_ASYNC_WEB, CasdaDownloadMode.SODA_SYNC_WEB);
+    /** Constant enum list for sync downloads */
+    public static final EnumSet<CasdaDownloadMode> SYNC_DOWNLOADS = EnumSet.of(CasdaDownloadMode.SODA_SYNC_WEB, 
+            CasdaDownloadMode.SODA_SYNC_PAWSEY);
+    /** Constant enum list for async downloads */
+    public static final EnumSet<CasdaDownloadMode> ASYNC_DOWNLOADS = EnumSet.of(CasdaDownloadMode.SODA_ASYNC_WEB, 
+            CasdaDownloadMode.SODA_ASYNC_PAWSEY);
+    /** Constant enum list for pawsey downloads */
+    public static final EnumSet<CasdaDownloadMode> PAWSEY_DOWNLOADS = EnumSet.of(CasdaDownloadMode.PAWSEY_HTTP, 
+            CasdaDownloadMode.SODA_ASYNC_PAWSEY, CasdaDownloadMode.SODA_SYNC_PAWSEY);
 
     /**
      * Encrypts the given text with the provided secret
@@ -170,5 +185,4 @@ public class Utils
     {
         return DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(date.getTime()));
     }
-
 }

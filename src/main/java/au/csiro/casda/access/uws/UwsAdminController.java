@@ -12,6 +12,7 @@ import org.joda.time.DateTimeZone;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
@@ -62,6 +63,9 @@ public class UwsAdminController
 
     @Autowired
     private DataAccessJobRepository dataAccessJobRepository;
+    
+    @Value("${google.analytics.id}")
+    private String googleAnalyticsId;
 
     /**
      * Display the queue of data access jobs on the server.
@@ -77,7 +81,7 @@ public class UwsAdminController
     {
 
         logger.info("Data access job queue requested.");
-
+        
         List<DataAccessJobDto> jobList = accessJobManager.getRunningJobList();
         List<DataAccessJobDto> availableJobList = accessJobManager.getRecentlyCompletedJobList();
         List<DataAccessJobDto> failedJobList = accessJobManager.getRecentlyFailedJobList();
@@ -88,6 +92,8 @@ public class UwsAdminController
         model.addAttribute("faileddays", accessJobManager.getDisplayDaysOfFailedJobs());
         model.addAttribute("availabledays", accessJobManager.getDisplayDaysOfAvailableJobs());
 
+        model.addAttribute("trackerId", googleAnalyticsId);
+        
         model.addAttribute("pausableQueues",
                 Arrays.asList(
                         new Queue(AccessJobManager.CATEGORY_A_JOB_LIST_NAME,

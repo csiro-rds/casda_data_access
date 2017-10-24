@@ -1,5 +1,7 @@
 package au.csiro.casda.access.jpa;
 
+import java.util.List;
+
 /*
  * #%L
  * CSIRO ASKAP Science Data Archive
@@ -88,8 +90,22 @@ public interface CachedFileRepository extends CrudRepository<CachedFile, Long>
      * @return The page of downloading CachedFiles.
      */
     @Query("SELECT cf FROM CachedFile cf WHERE cf.fileAvailableFlag = false AND "
-            + "cf.downloadJobRetryCount <= :maxRetryCount AND cf.fileType != 'CATALOGUE'"
-            + " AND (cf.fileType != 'IMAGE_CUTOUT' OR (cf.fileType = 'IMAGE_CUTOUT' AND cf.originalFilePath is not null))")
+            + "cf.downloadJobRetryCount <= :maxRetryCount AND cf.fileType != 'CATALOGUE' AND cf.fileType != 'ERROR'"
+            + " AND NOT (cf.fileType IN ('IMAGE_CUTOUT', 'GENERATED_SPECTRUM') AND cf.originalFilePath is null)")
     public Page<CachedFile> findDownloadingCachedFiles(@Param("maxRetryCount") int maxRetryCount, Pageable pageable);
+    
+    /**
+     * Finds the cached files that are currently downloading. This is indicated by the fileAvailableFlag set to false,
+     * the retry count set to a number less than the given maximum retry count, the filetype is not catalogue (these are
+     * generated inline from a call to VO Tools)
+     * 
+     * @param maxRetryCount
+     *            the maximum number of retries allowed
+     * @return The page of downloading CachedFiles.
+     */
+    @Query("SELECT cf FROM CachedFile cf WHERE cf.fileAvailableFlag = false AND "
+            + "cf.downloadJobRetryCount <= :maxRetryCount AND cf.fileType != 'CATALOGUE'"
+            + " AND NOT (cf.fileType IN ('IMAGE_CUTOUT', 'GENERATED_SPECTRUM') AND cf.originalFilePath is null)")
+    public List<CachedFile> findDownloadingCachedFiles(@Param("maxRetryCount") int maxRetryCount);
 
 }

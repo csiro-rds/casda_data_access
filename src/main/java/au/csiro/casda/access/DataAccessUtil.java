@@ -13,18 +13,21 @@ package au.csiro.casda.access;
  */
 
 import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
@@ -32,17 +35,14 @@ import org.joda.time.format.DateTimeFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import au.csiro.casda.access.soda.RequestToken;
+import au.csiro.casda.access.util.Utils;
 import au.csiro.casda.entity.dataaccess.CachedFile.FileType;
 import au.csiro.casda.entity.dataaccess.CasdaDownloadMode;
 import au.csiro.casda.entity.dataaccess.DataAccessJob;
-import au.csiro.casda.entity.dataaccess.ImageCutout;
 import au.csiro.casda.entity.dataaccess.ParamMap.ParamKeyWhitelist;
-import au.csiro.casda.entity.observation.Catalogue;
 import au.csiro.casda.entity.observation.CatalogueType;
-import au.csiro.casda.entity.observation.ImageCube;
-import au.csiro.casda.entity.observation.Level7Collection;
-import au.csiro.casda.entity.observation.MeasurementSet;
-import au.csiro.casda.entity.observation.Observation;
+import au.csiro.casda.entity.observation.Thumbnail;
 
 /**
  * Utility methods for data access
@@ -54,6 +54,34 @@ public class DataAccessUtil
 {
 
     private static final Logger logger = LoggerFactory.getLogger(DataAccessUtil.class);
+    /** Constant for the id param */
+    public static final String ID = "id";
+    /** Constant for the filesize param */
+    public static final String FILE_SIZE = "filesize";
+    /** Constant for the imagecubeid param */
+    public static final String IMAGE_CUBE_ID = "imagecubeid";
+    /** Constant for the imagecubesize param */
+    public static final String IMAGE_CUBE_SIZE = "imagecubesize";
+    /** Constant for the filename param */
+    public static final String FILENAME = "filename";
+    /** Constant for the obsid param */
+    public static final String OBSERVATION_ID = "obsid";
+    /** Constant for the l7id param */
+    public static final String LEVEL7_ID = "l7id";
+    /** Constant for the message param */
+    public static final String MESSAGE = "message";
+    /** Constant for the encapsulationfilename param */
+    public static final String ENCAPSULATION_FILENAME = "encapsulationfilename";
+    /** Constant for the encapsulationid param */
+    public static final String ENCAPSULATION_ID = "encapsulationid";
+    /** Constant for the encapsulationfilesize param */
+    public static final String ENCAPSULATION_FILE_SIZE = "encapsulationfilesize";
+    /** Constant for the projectid param */
+    public static final String PROJECT_ID = "projectid";
+    /** Constant for the cataloguetype param */
+    public static final String CATALOGUE_TYPE = "cataloguetype";
+    /** Constant for the tablename param */
+    public static final String TABLE_NAME = "tablename";
 
     /**
      * Generate the relative url to download a file.
@@ -69,11 +97,8 @@ public class DataAccessUtil
     public static String getRelativeLinkForFile(CasdaDownloadMode downloadMode, String requestId, String filename)
     {
         StringBuilder relativeLink = new StringBuilder();
-        if (downloadMode == CasdaDownloadMode.PAWSEY_HTTP)
-        {
-            relativeLink.append("pawsey/");
-        }
-        relativeLink.append("requests/").append(requestId).append("/").append(filename);
+        relativeLink.append(Utils.PAWSEY_DOWNLOADS.contains(downloadMode) ? "pawsey/" : "web/");
+        relativeLink.append(requestId).append("/").append(filename);
         return relativeLink.toString();
     }
 
@@ -144,32 +169,34 @@ public class DataAccessUtil
 
     /**
      * Generates the list of catalogue download files for a given job.
-     * 
+     * @param catalogues the catalogue data to convert to download files
+     * @param fileList the file list to add the catalogues to
      * @param job
      *            the data access job
      * @param jobDirectory
      *            the job filesystem directory location
-     * @return the list of catalogue download files
      */
-    public static List<DownloadFile> getCatalogueDownloadFiles(DataAccessJob job, File jobDirectory)
+    public static void getCatalogueDownloadFiles(List<Map<String, Object>> catalogues, List<DownloadFile> fileList, 
+    		File jobDirectory, DataAccessJob job)
     {
+    	
         logger.debug("getting catalogue download files for job: {}", job.getRequestId());
-        List<DownloadFile> downloadFiles = new ArrayList<>();
-        if (CollectionUtils.isEmpty(job.getCatalogues()))
+        if (CollectionUtils.isEmpty(catalogues))
         {
-            return downloadFiles;
+            return;
         }
+        List<DownloadFile> catFileList = new ArrayList<DownloadFile>();
         CatalogueDownloadFormat downloadFormat = CatalogueDownloadFormat.valueOf(job.getDownloadFormat().toUpperCase());
         if (downloadFormat.isIndividual())
         {
-            for (Catalogue catalogue : job.getCatalogues())
+            for (Map<String, Object> catalogue : catalogues)
             {
                 String filename = null;
                 String qualifiedTablename = null;
-                if (catalogue.getCatalogueType() == CatalogueType.LEVEL7)
+                if (CatalogueType.valueOf((String) catalogue.get(CATALOGUE_TYPE)) == CatalogueType.DERIVED_CATALOGUE)
                 {
                     filename = getLevel7CatalogueFilename(catalogue, downloadFormat);
-                    qualifiedTablename = catalogue.getEntriesTableName();
+                    qualifiedTablename = (String) catalogue.get(TABLE_NAME);
                 }
                 else
                 {
@@ -178,35 +205,39 @@ public class DataAccessUtil
 
                 CatalogueDownloadFile downloadFile = new CatalogueDownloadFile();
                 downloadFile.setFilename(filename);
-                downloadFile.setDisplayName(catalogue.getFilename());
-                downloadFile.getCatalogueIds().add(catalogue.getId());
-                downloadFile.setCatalogueType(catalogue.getCatalogueType());
+                downloadFile.setDisplayName((String)catalogue.get(FILENAME));
+                downloadFile.getCatalogueIds().add((Long)catalogue.get(ID));
+                downloadFile.setCatalogueType(CatalogueType.valueOf((String) catalogue.get(CATALOGUE_TYPE)));
                 downloadFile.setQualifiedTablename(qualifiedTablename);
-                downloadFiles.add(downloadFile);
+                catFileList.add(downloadFile);
             }
         }
         else if (downloadFormat.isGrouped())
         {
-            List<CatalogueType> distinctCatalogueTypes = job.getCatalogues().stream()
-                    .map(catalogue -> catalogue.getCatalogueType()).distinct().collect(Collectors.toList());
+        	Set<CatalogueType> distinctCatalogueTypes = new TreeSet<CatalogueType>();
+        	for(Map<String, Object> singleArtefact : catalogues)
+        	{
+        		distinctCatalogueTypes.add(CatalogueType.valueOf((String)singleArtefact.get(CATALOGUE_TYPE)));
+        	}
+            
             for (CatalogueType catalogueType : distinctCatalogueTypes)
             {
                 CatalogueDownloadFile downloadFile = new CatalogueDownloadFile();
                 downloadFile.setFilename(getGroupedCatalogueFilename(catalogueType, downloadFormat));
                 downloadFile.setDisplayName(downloadFile.getFilename());
-                for (Catalogue catalogue : job.getCatalogues())
+                for (Map<String, Object> catalogue : catalogues)
                 {
-                    if (catalogue.getCatalogueType() == catalogueType)
+                    if (CatalogueType.valueOf((String) catalogue.get(CATALOGUE_TYPE)) == catalogueType)
                     {
-                        downloadFile.getCatalogueIds().add(catalogue.getId());
+                        downloadFile.getCatalogueIds().add((Long) catalogue.get(ID));
                     }
                 }
                 downloadFile.setCatalogueType(catalogueType);
-                downloadFiles.add(downloadFile);
+                catFileList.add(downloadFile);
             }
         }
 
-        for (DownloadFile downloadFile : downloadFiles)
+        for (DownloadFile downloadFile : catFileList)
         {
             CatalogueDownloadFile catalogueDownloadFile = (CatalogueDownloadFile) downloadFile;
             String fileId = job.getRequestId() + "-" + catalogueDownloadFile.getFilename();
@@ -220,8 +251,7 @@ public class DataAccessUtil
             catalogueDownloadFile.setFileId(fileId);
             catalogueDownloadFile.setDownloadFormat(downloadFormat);
         }
-
-        return downloadFiles;
+        fileList.addAll(catFileList);
     }
 
     /**
@@ -233,18 +263,18 @@ public class DataAccessUtil
      *            the requested download format, eg CSV or VOTABLE
      * @return filename, eg AS007_Continuum_Component_Catalogue_1234.csv
      */
-    public static String getIndividualCatalogueFilename(Catalogue catalogue, CatalogueDownloadFormat downloadFormat)
+    public static String getIndividualCatalogueFilename(Map<String, Object> catalogue, 
+    		CatalogueDownloadFormat downloadFormat)
     {
-        if (catalogue.getProject() == null || StringUtils.isBlank(catalogue.getProject().getOpalCode()))
+        if (StringUtils.isBlank((String)catalogue.get(PROJECT_ID)))
         {
             throw new IllegalArgumentException("Catalogue must be associated with a project with a valid project code");
         }
-        if (catalogue.getCatalogueType() == null)
+        if (StringUtils.isBlank((String)catalogue.get(CATALOGUE_TYPE)))
         {
             throw new IllegalArgumentException("Catalogue must have a catalogue type set");
         }
-        if (catalogue.getParent() == null || !(catalogue.getParent() instanceof Observation)
-                || ((Observation) catalogue.getParent()).getSbid() == null)
+        if ((Integer)catalogue.get(OBSERVATION_ID) == null)
         {
             throw new IllegalArgumentException("Catalogue must be associated with an observation with a valid sbid");
         }
@@ -254,9 +284,9 @@ public class DataAccessUtil
         }
 
         StringBuilder filename = new StringBuilder();
-        filename.append(catalogue.getProject().getOpalCode());
+        filename.append((String)catalogue.get(PROJECT_ID));
         filename.append("_");
-        String[] catalogueTypeNames = catalogue.getCatalogueType().name().split("_");
+        String[] catalogueTypeNames = ((String)catalogue.get(CATALOGUE_TYPE)).split("_");
         for (String catalogueTypeName : catalogueTypeNames)
         {
             filename.append(StringUtils.capitalize(catalogueTypeName.toLowerCase()));
@@ -264,9 +294,16 @@ public class DataAccessUtil
         }
         filename.append("Catalogue");
         filename.append("_");
-        filename.append(((Observation) catalogue.getParent()).getSbid());
+        if((Integer)catalogue.get(OBSERVATION_ID) != null)
+        {
+        	filename.append((Integer)catalogue.get(OBSERVATION_ID));
+        }
+        else
+        {
+        	filename.append((Long)catalogue.get(LEVEL7_ID));
+        }
         filename.append("_");
-        filename.append(catalogue.getId());
+        filename.append((Long)catalogue.get(ID));
         filename.append(".");
         filename.append(downloadFormat.getFileExtension());
         return filename.toString();
@@ -281,18 +318,18 @@ public class DataAccessUtil
      *            the requested download format, eg CSV or VOTABLE
      * @return filename, eg AS007_Level7_Catalogue_1234.csv
      */
-    public static String getLevel7CatalogueFilename(Catalogue catalogue, CatalogueDownloadFormat downloadFormat)
+    public static String getLevel7CatalogueFilename(Map<String, Object> catalogue, 
+    		CatalogueDownloadFormat downloadFormat)
     {
-        if (catalogue.getProject() == null || StringUtils.isBlank(catalogue.getProject().getOpalCode()))
+        if (StringUtils.isBlank((String)catalogue.get(PROJECT_ID)))
         {
             throw new IllegalArgumentException("Catalogue must be associated with a project with a valid project code");
         }
-        if (catalogue.getCatalogueType() != CatalogueType.LEVEL7)
+        if (CatalogueType.valueOf((String)catalogue.get(CATALOGUE_TYPE)) != CatalogueType.DERIVED_CATALOGUE)
         {
             throw new IllegalArgumentException("Catalogue must be of type Level 7");
         }
-        if (catalogue.getParent() == null || !(catalogue.getParent() instanceof Level7Collection)
-                || catalogue.getParent().getUniqueId() == null)
+        if ((Long)catalogue.get(LEVEL7_ID) == null)
         {
             throw new IllegalArgumentException(
                     "Catalogue must be associated with a level 7 collection with a valid collection id");
@@ -303,19 +340,15 @@ public class DataAccessUtil
         }
 
         StringBuilder filename = new StringBuilder();
-        filename.append(catalogue.getProject().getOpalCode());
+        filename.append((String)catalogue.get(PROJECT_ID));
         filename.append("_");
-        String[] catalogueTypeNames = catalogue.getCatalogueType().name().split("_");
-        for (String catalogueTypeName : catalogueTypeNames)
-        {
-            filename.append(StringUtils.capitalize(catalogueTypeName.toLowerCase()));
-            filename.append("_");
-        }
+        filename.append(CatalogueType.valueOf((String)catalogue.get(CATALOGUE_TYPE)).getDescription().replace(" ", "_"));
+        filename.append("_");
         filename.append("Catalogue");
         filename.append("_");
-        filename.append(catalogue.getEntriesTableName().replace("casda.", ""));
+        filename.append(((String)catalogue.get(TABLE_NAME)).replace("casda.", ""));
         filename.append("_");
-        filename.append(catalogue.getId());
+        filename.append((Long)catalogue.get(ID));
         filename.append(".");
         filename.append(downloadFormat.getFileExtension());
         return filename.toString();
@@ -357,73 +390,136 @@ public class DataAccessUtil
         filename.append(".");
         filename.append(downloadFormat.getFileExtension());
         return filename.toString();
+    }  
+    
+    /**
+     * The thumbnail file requested for download, this will hold file id, name and size information
+     * 
+     * @param thumbnail
+     *            the thumbnail requested
+     * @return the thumbnail file details
+     */
+	public static EncapsulatedFileDescriptor getThumbnailFile(Thumbnail thumbnail)
+    {
+        logger.debug("Getting thumbnail files");
+        
+        return new EncapsulatedFileDescriptor(thumbnail.getFileId(), thumbnail.getFilesize(), 
+        		FileType.THUMBNAIL, thumbnail.getFilename(), thumbnail.getEncapsulationFile());
     }
 
     /**
-     * The list of measurement set files requested for download, these hold file id, name and size information
+     * The list of files requested for download, these hold the file id, filename and size information as well as 
+     * encapsulation file
      * 
-     * @param measurementSets
-     *            the list of measurement sets in the request
-     * @return the list of measurement set file details
+     * @param artefactDetails
+     *            the list of encapsulated file details in the request
+     * @param fileList the file list to add these files to      
+     * @param fileType the type of file         
      */
-    public static List<DownloadFile> getMeasurementSetFiles(List<MeasurementSet> measurementSets)
+	public static void getEncapsulatedFileDescriptor
+    (List<Map<String, Object>> artefactDetails, List<DownloadFile> fileList, FileType fileType)
     {
-        logger.debug("Getting measurement set files");
-        return measurementSets.stream().map(
-                ms -> new FileDescriptor(ms.getFileId(), ms.getFilesize(), FileType.MEASUREMENT_SET, ms.getFilename()))
-                .collect(Collectors.toList());
+    	logger.debug("Getting " + fileType.getCollectionName() + " files");
+    	
+    	for(Map<String, Object> singleArtefact : artefactDetails)
+    	{
+    		
+    		String uniqueId = DataAccessUtil.compileUniqueFileId(singleArtefact.get(OBSERVATION_ID), 
+    				singleArtefact.get(LEVEL7_ID), fileType.getCollectionName(),
+    				(String)singleArtefact.get(FILENAME), (Long)singleArtefact.get(ID));
+    		
+    		String encapUniqueId= null;
+    		if(StringUtils.isNotBlank((String)singleArtefact.get(ENCAPSULATION_FILENAME)))
+    		{
+        		encapUniqueId = DataAccessUtil.compileUniqueFileId(singleArtefact.get(OBSERVATION_ID), 
+        				singleArtefact.get(LEVEL7_ID), FileType.ENCAPSULATION_FILE
+        				.getCollectionName(), (String)singleArtefact.get(ENCAPSULATION_FILENAME)
+        				, (Long)singleArtefact.get(ENCAPSULATION_ID));
+    		}
+
+    		//since a project team member is able to download l7 encapsulated files pre-approval, the undeposited encap
+    		//file will have a null filesize.
+    		Long fileSize = singleArtefact.get(ENCAPSULATION_FILE_SIZE) != null ? 
+    				(Long)singleArtefact.get(ENCAPSULATION_FILE_SIZE) : 0;
+    		
+    		DownloadFile file = new EncapsulatedFileDescriptor(uniqueId, (Long)singleArtefact.get(FILE_SIZE), 
+    				fileType, (String)singleArtefact.get(FILENAME), encapUniqueId, fileSize, 
+    				(String)singleArtefact.get(ENCAPSULATION_FILENAME));
+    		file.setId((Long)singleArtefact.get(ID));
+    		fileList.add(file);
+    	}
+    }
+	
+    /**
+     * The list of files requested for download, these hold the file id, filename and size information
+     * 
+     * @param artefactDetails
+     *            the list of file details in the request
+     * @param fileList the file list to add these files to      
+     * @param fileType the type of file         
+     */
+	public static void getFileDescriptors
+    (List<Map<String, Object>> artefactDetails, List<DownloadFile> fileList, FileType fileType)
+    {
+    	logger.debug("Getting " + fileType.getCollectionName() + " files");
+    	
+    	for(Map<String, Object> singleArtefact : artefactDetails)
+    	{									
+    		String uniqueId = DataAccessUtil.compileUniqueFileId(singleArtefact.get(OBSERVATION_ID), 
+    				singleArtefact.get(LEVEL7_ID), fileType.getCollectionName(),
+    				(String)singleArtefact.get(FILENAME), (Long)singleArtefact.get(ID));
+    		
+    		DownloadFile file = new FileDescriptor(uniqueId, 
+    				(Long)singleArtefact.get(FILE_SIZE), fileType, (String)singleArtefact.get(FILENAME));
+    		file.setId((Long)singleArtefact.get(ID));
+    		fileList.add(file);
+    	}
+    }
+
+	/**
+     * @param artefactDetails
+     *            the list of file details in the request
+     * @param fileList the file list to add these files to      
+     * @param fileType the type of file  
+	 */
+    public static void getGeneratedImageFiles(
+    		List<Map<String, Object>> artefactDetails, List<DownloadFile> fileList, FileType fileType)
+    {
+    	logger.debug("Getting " + fileType.getCollectionName() + " files");
+    	
+    	for(Map<String, Object> singleArtefact : artefactDetails)
+    	{
+    	    String format = (String) singleArtefact.get("format");
+    	    String fileExt = "png".equals(format) ?  "png" : "fits";
+    		String fileId = (fileType == FileType.IMAGE_CUTOUT ? "cutout-" : "spectrum-") + 
+    				(Long)singleArtefact.get(ID)+ "-imagecube-"+ (Long)singleArtefact.get(IMAGE_CUBE_ID) + "." + fileExt;
+    		
+    		GeneratedFileDescriptor fileDesc = new GeneratedFileDescriptor((Long)singleArtefact.get(ID),
+    				fileId, (Long)singleArtefact.get(FILE_SIZE), compileUniqueFileId(singleArtefact.get(OBSERVATION_ID), 
+    	    				singleArtefact.get(LEVEL7_ID), 
+    				FileType.IMAGE_CUBE.getCollectionName(), (String)singleArtefact.get(FILENAME),
+    				(Long)singleArtefact.get(IMAGE_CUBE_ID)), (Long)singleArtefact.get(IMAGE_CUBE_SIZE), fileType);
+    		fileDesc.setId((Long)singleArtefact.get(ID));
+    		fileDesc.setImageCubeId((Long)singleArtefact.get(IMAGE_CUBE_ID));
+    		fileList.add(fileDesc);
+    	}
     }
 
     /**
-     * The list of image cube files requested for download, these hold the file id, filename and size information
-     * 
-     * @param imageCubes
-     *            the list of image cubes in the request
-     * @return the list of image cube file details
+     * @param artefactDetails
+     *            the list of file details in the request
+     * @param fileList the file list to add these files to    
      */
-    public static List<DownloadFile> getImageCubeFiles(List<ImageCube> imageCubes)
-    {
-        logger.debug("Getting image cube files");
-        return imageCubes.stream()
-                .map(ic -> new FileDescriptor(ic.getFileId(), ic.getFilesize(), FileType.IMAGE_CUBE, ic.getFilename()))
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * The list of image cutout files requested for download, these hold the file id, filename and size information
-     * 
-     * @param imageCutout
-     *            the list of image cutouts in the request
-     * @return the list of image cutout file details
-     */
-    public static List<DownloadFile> getImageCutoutFiles(List<ImageCutout> imageCutout)
-    {
-        logger.debug("Getting image cutout files");
-        return imageCutout.stream()
-                .map(cutout -> new CutoutFileDescriptor(cutout.getId(),
-                        "cutout-" + cutout.getId() + "-imagecube-" + cutout.getImageCube().getId() + ".fits",
-                        cutout.getFilesize(), cutout.getImageCube().getFileId(), cutout.getImageCube().getFilesize()))
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * The list of all download files for a given job, including image cubes, measurement sets and catalogues
-     * 
-     * @param job
-     *            the data access job
-     * @param jobDir
-     *            the location of the directory for the download job
-     * @return the list of download file information
-     */
-    public static Collection<DownloadFile> getDataAccessJobDownloadFiles(DataAccessJob job, File jobDir)
-    {
-        Collection<DownloadFile> files = new ArrayList<>();
-        files.addAll(DataAccessUtil.getImageCubeFiles(job.getImageCubes()));
-        files.addAll(DataAccessUtil.getMeasurementSetFiles(job.getMeasurementSets()));
-        files.addAll(DataAccessUtil.getCatalogueDownloadFiles(job, jobDir));
-        files.addAll(DataAccessUtil.getImageCutoutFiles(job.getImageCutouts()));
-        return files;
-    }
+	public static void getErrorFiles(List<Map<String, Object>> artefactDetails, List<DownloadFile> fileList)
+	{
+		for(Map<String, Object> error : artefactDetails)
+		{
+			ErrorFileDescriptor errorDesc = new ErrorFileDescriptor(String.format("error-%02d.txt", error.get("id")), 
+					(String)error.get(MESSAGE));	
+			errorDesc.setId((Long)error.get(ID));
+			fileList.add(errorDesc);
+		}
+	}
 
     /**
      * Converts a value in bytes to kilobytes.
@@ -481,6 +577,71 @@ public class DataAccessUtil
         }
         return paramsMap;
     }
+    
+    /**
+     * @param obsId the main SBID for an observation
+     * @param l7Id the dap collection id for L7 collections
+     * @param collectionName the collection name
+     * @param filename the file name
+     * @param id the id of the artefact
+     * @return a unique identifier for this artefact
+     */
+    public static String compileUniqueFileId(Object obsId, Object l7Id, String collectionName, String filename, Long id)
+    {
+        final int maxNgasFileIdLen = 64;
+        try
+        {
+    		String parentId = obsId == null ? "level7/" + l7Id : "observations/" + obsId;
+    				
+            String obsPrefix = obsId == null && l7Id == null ? "None" : parentId;
+            
+            String identifier = obsPrefix + "/" + collectionName + "/"
+                    + URLEncoder.encode(filename, "UTF-8");
+            if (identifier.length() > maxNgasFileIdLen || !filename.matches("^[A-Za-z0-9._-]+$"))
+            {
+                String extension = FilenameUtils.getExtension(filename);
+                identifier = obsPrefix + "/" + collectionName + "/" + id
+                		+ (extension.length() > 0 ? "." + extension : "");
+            }
+            return identifier.replace("/", "-");
+        }
+        catch (UnsupportedEncodingException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * @param dataAccessJob the data access job
+     * @param dataLinkAccessSecretKey the secret key needed to unencrypt the id param
+     * @return true if cutouts need to be created for this data access job
+     */
+	public static boolean imageCutoutsShouldBeCreated(DataAccessJob dataAccessJob, String dataLinkAccessSecretKey) 
+	{
+		if(generatedFilesShouldBeCreated(dataAccessJob))
+		{
+			RequestToken token = new RequestToken(dataAccessJob.getParamMap().get(ParamKeyWhitelist.ID.name())[0], 
+					dataLinkAccessSecretKey);
+			return RequestToken.CUTOUT.equals(token.getDownloadMode());
+		}
+		return false;
+	}
+	
+    /**
+     * @param dataAccessJob the data access job
+     * @param dataLinkAccessSecretKey the secret key needed to unencrypt the id param
+     * @return true if spectra need to be created for this data access job
+     */
+	public static boolean spectrumShouldBeCreated(DataAccessJob dataAccessJob, String dataLinkAccessSecretKey) 
+	{
+		if(generatedFilesShouldBeCreated(dataAccessJob))
+		{
+            RequestToken token = new RequestToken(dataAccessJob.getParamMap().get(ParamKeyWhitelist.ID.name())[0], 
+					dataLinkAccessSecretKey);
+			return RequestToken.GENERATED_SPECTRUM.equals(token.getDownloadMode());
+		}
+		return false;
+	}
 
     /**
      * Checks whether image cutouts should be created for the data access job.
@@ -489,10 +650,9 @@ public class DataAccessUtil
      *            the data access job
      * @return whether image cutouts should be created for the data access job
      */
-    public static boolean imageCutoutsShouldBeCreated(DataAccessJob dataAccessJob)
-    {
-        return dataAccessJob.getDownloadMode() == CasdaDownloadMode.SIAP_ASYNC
-                && !dataAccessJob.getParamMap().keySet().isEmpty()
+    public static boolean generatedFilesShouldBeCreated(DataAccessJob dataAccessJob)
+    {		
+        return !dataAccessJob.getParamMap().keySet().isEmpty()
                 && ArrayUtils.isNotEmpty(dataAccessJob.getParamMap().get(ParamKeyWhitelist.ID.name()))
                 && dataAccessJob.getParamMap().keySet().size() > 1;
     }

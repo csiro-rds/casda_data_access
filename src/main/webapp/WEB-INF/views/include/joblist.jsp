@@ -97,7 +97,7 @@
 				</c:choose>
 
 				<tr class="${rowStyle}">
-					<td><a href="<c:url value='/requests/${job.requestId}'/>">${job.requestId}</a></td>
+					<td><a href="<c:url value='/requests/${job.requestId}/page/1'/>">${job.requestId}</a></td>
 					<c:choose>
 						<c:when test="${showqueue == 'true' }">
 							<td>${job.queue}</td>

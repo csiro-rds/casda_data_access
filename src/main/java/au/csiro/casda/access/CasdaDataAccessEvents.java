@@ -39,7 +39,7 @@ public enum CasdaDataAccessEvents implements CasdaEvent
      */
     E039("Data retrieved",
             "Data retrieved successfully for request ID %s] [volumeKB: %d] [volumeRetrievedKB: %d] "
-            + "[volumeAlreadyCachedKB: %d"),
+            + "[volumeAlreadyCachedKB: %d] [accessMode: %s] [accessType: %s"),
     /**
      * Start downloading a file
      */

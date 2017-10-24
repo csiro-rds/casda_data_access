@@ -17,6 +17,13 @@ import java.nio.file.Path;
  */
 
 import java.util.Collection;
+import java.util.Date;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
@@ -33,16 +40,16 @@ import org.springframework.stereotype.Component;
 
 import au.csiro.casda.access.CasdaDataAccessEvents;
 import au.csiro.casda.access.CatalogueDownloadFile;
-import au.csiro.casda.access.CutoutFileDescriptor;
-import au.csiro.casda.access.DataAccessUtil;
 import au.csiro.casda.access.DownloadFile;
-import au.csiro.casda.access.InlineScriptException;
+import au.csiro.casda.access.EncapsulatedFileDescriptor;
+import au.csiro.casda.access.ErrorFileDescriptor;
+import au.csiro.casda.access.FileDescriptor;
+import au.csiro.casda.access.GeneratedFileDescriptor;
 import au.csiro.casda.access.ResourceNotFoundException;
 import au.csiro.casda.access.rest.CatalogueRetrievalException;
 import au.csiro.casda.access.rest.CreateChecksumException;
 import au.csiro.casda.access.rest.VoToolsCataloguePackager;
 import au.csiro.casda.access.services.DataAccessService;
-import au.csiro.casda.access.services.InlineScriptService;
 import au.csiro.casda.access.services.NgasService.ServiceCallException;
 import au.csiro.casda.entity.dataaccess.CachedFile;
 import au.csiro.casda.entity.dataaccess.CachedFile.FileType;
@@ -116,9 +123,7 @@ public class Packager
 
     private static Logger logger = LoggerFactory.getLogger(Packager.class);
 
-    private InlineScriptService inlineScriptService;
-
-    private String calculateChecksumScript;
+    private DownloadManager downloadManager;
 
     /**
      * Constructor
@@ -131,23 +136,19 @@ public class Packager
      *            service used to access data
      * @param downloadSleepInterval
      *            time to sleep when waiting for downloading file processes to finish, millis
-     * @param inlineScriptService
-     *            service for calling shell scripts inline, used here to create checksums
-     * @param calculateChecksumScript
-     *            the path to the calculate checksum script
+     * @param downloadManager
+     *            The service instance to manage retrieving and producing files.
      */
     @Autowired
     public Packager(CacheManagerInterface cacheManager, VoToolsCataloguePackager voToolsCataloguePackager,
             DataAccessService dataAccessService, @Value("${download.sleep.interval}") int downloadSleepInterval,
-            InlineScriptService inlineScriptService,
-            @Value("${calculate.checksum.script}") String calculateChecksumScript)
+            DownloadManager downloadManager)
     {
         this.cacheManager = cacheManager;
         this.voToolsCataloguePackager = voToolsCataloguePackager;
         this.dataAccessService = dataAccessService;
         this.downloadSleepIntervalMillis = downloadSleepInterval;
-        this.inlineScriptService = inlineScriptService;
-        this.calculateChecksumScript = calculateChecksumScript;
+        this.downloadManager = downloadManager;
     }
 
     /**
@@ -174,48 +175,94 @@ public class Packager
     public Result pack(DataAccessJob job, int hoursToExpiryForJob) throws CacheFullException, CacheException,
             CatalogueRetrievalException, CreateChecksumException, InterruptedException, ResourceNotFoundException
     {
-        Collection<DownloadFile> files = assembleDataAccessJobDownloadFiles(job);
-
-        if (CollectionUtils.isEmpty(files))
+        List<Map<FileType, Integer[]>> paging = dataAccessService.getPaging(job.getRequestId(), false);
+        
+        if (CollectionUtils.isEmpty(paging))
         {
             // return now - no need to go further if there are no files to download.
             return new Result(DateTime.now(DateTimeZone.UTC), 0, 0);
         }
-
-        // If it is possible to release enough space, old files will be irreversibly deleted.
-        // This method will register the files that need to be downloaded in the CachedFile table as placeholders, so we
-        // can make accurate size estimations. These will be identified as running jobs by the DownloadManager which
-        // runs a scheduled task to start and check download jobs. This method sets a default expiry time on the files
-        // to now + one week.
-        Long sizeInCacheKb = cacheManager.reserveSpaceAndRegisterFilesForDownload(files, job);
-
-        pollUntilFileDownloadComplete(job, files, hoursToExpiryForJob);
-
-        cacheManager.createDataAccessJobDirectory(job, files);
-
-        // re-calculate the job expiry to allow for some slow retrieval and update cached files
+        
         DateTime jobExpiryDate = DateTime.now(DateTimeZone.UTC).plusHours(hoursToExpiryForJob);
-        cacheManager.updateUnlockForFiles(files, jobExpiryDate);
-        dataAccessService.updateFileSizeForCutouts(job.getRequestId(), files);
+        long sizeKbOfThisJob = 0;
+        long sizeInCacheKb = 0;
+        
+        for(int pageNum = 0; pageNum < paging.size(); pageNum++)
+        {
+            logger.info("Packing page "+ pageNum + " for request " + job.getRequestId());
+        	List<DownloadFile> filesPage = dataAccessService.getPageOfFiles(paging.get(pageNum), job);
 
-        long sizeKbOfThisJob = files.stream().mapToLong(file -> file.getSizeKb()).sum();
+            logger.debug("Page "+ pageNum + " retrieved for request " + job.getRequestId());
+        	
+            Collection<DownloadFile> files = assembleDataAccessJobDownloadFiles(filesPage);
+
+            logger.debug("Files assembled for "+ pageNum + " for request " + job.getRequestId());
+            
+            // If it is possible to release enough space, old files will be irreversibly deleted.
+            // This method will register the files that need to be downloaded in the CachedFile table as placeholders, 
+            // so we can make accurate size estimations. These will be identified as running jobs by the DownloadManager
+            //which runs a scheduled task to start and check download jobs. This method sets a default expiry time on 
+            // the files to now + one week.
+            Object[] sizeAndCacheFiles = cacheManager.reserveSpaceAndRegisterFilesForDownload(files, job);
+            sizeInCacheKb += (Long) sizeAndCacheFiles[0];
+            List<CachedFile> filesToDownload = (List<CachedFile>) sizeAndCacheFiles[1];
+
+            // Notify DMF about the files that we are intending to bring online
+            // This will block until the files are retrieved from tape
+            if (CollectionUtils.isNotEmpty(filesToDownload))
+            {
+                String filePaths = buildUniqueFilePaths(filesToDownload);
+                if (StringUtils.isNotBlank(filePaths))
+                {
+                    dataAccessService.signalDownloadFilesToGoOnline(filePaths);
+                }
+            }   
+                   
+            pollUntilFileDownloadComplete(job, files, hoursToExpiryForJob);
+
+            cacheManager.createDataAccessJobDirectory(job, files);
+
+            cacheManager.updateUnlockForFiles(files, jobExpiryDate);
+            logger.debug("Unlock update completed for "+ pageNum + " for request " + job.getRequestId());
+            dataAccessService.updateFileSizeForGeneratedFiles(files);
+            logger.debug("File size update completed for "+ pageNum + " for request " + job.getRequestId());
+            sizeKbOfThisJob += files.stream().mapToLong(file -> file.getSizeKb()).sum();
+            logger.debug("Pack loop completed for "+ pageNum + " for request " + job.getRequestId());
+        }
+        
+        job.setSizeKb(sizeKbOfThisJob);
+        dataAccessService.saveJob(job);
+
+        logger.info("Pack completed for request " + job.getRequestId());
+        
         return new Result(jobExpiryDate, sizeInCacheKb, sizeKbOfThisJob);
+    }
+
+    private String buildUniqueFilePaths(List<CachedFile> filesToDownload)
+    {
+        Set<String> filePathsSet = new HashSet<>();
+        for (CachedFile cachedFile : filesToDownload)
+        {
+            if (!EnumSet.of(FileType.CATALOGUE, FileType.ERROR).contains(cachedFile.getFileType()))
+            {
+                filePathsSet.add(cachedFile.getOriginalFilePath());
+            }
+        }
+        String filePaths = StringUtils.join(filePathsSet, " ");
+        return filePaths;
     }
 
     /**
      * Assembles the download file details for the files requested by this data access job.
      * 
-     * @param job
-     *            the data access job
+     * @param files the list of files to assemble
      * @return the details of the files requested for download.
      * @throws ResourceNotFoundException
      *             if the job's file type was an IMAGE_CUTOUT and the source file could not be found in NGAS
      */
-    Collection<DownloadFile> assembleDataAccessJobDownloadFiles(DataAccessJob job) throws ResourceNotFoundException
+    Collection<DownloadFile> assembleDataAccessJobDownloadFiles(Collection<DownloadFile> files) 
+    		throws ResourceNotFoundException
     {
-        Collection<DownloadFile> files =
-                DataAccessUtil.getDataAccessJobDownloadFiles(job, cacheManager.getJobDirectory(job));
-
         for (DownloadFile downloadFile : files)
         {
             if (downloadFile.getFileType() == FileType.CATALOGUE)
@@ -223,17 +270,55 @@ public class Packager
                 long sizeKb = voToolsCataloguePackager.estimateFileSizeKb((CatalogueDownloadFile) downloadFile);
                 downloadFile.setSizeKb(sizeKb);
             }
-            if (downloadFile.getFileType() == FileType.IMAGE_CUTOUT)
+            else if (downloadFile.isGeneratedFileType())
             {
-                CutoutFileDescriptor cutoutDownloadFile = (CutoutFileDescriptor) downloadFile;
+                GeneratedFileDescriptor generatedDownloadFile = (GeneratedFileDescriptor) downloadFile;
                 // if the file is on disk, use it - otherwise we will rely on getting it from the cache
                 try
                 {
                     Path filePathOnDisk = dataAccessService
-                            .findFileInNgasIfOnDisk(cutoutDownloadFile.getOriginalImageDownloadFile().getFileId());
+                            .findFileInNgas(generatedDownloadFile.getOriginalImageDownloadFile().getFileId());
                     if (filePathOnDisk != null)
                     {
-                        cutoutDownloadFile.setOriginalImageFilePath(filePathOnDisk.toFile().getAbsolutePath());
+                    	generatedDownloadFile.setOriginalImageFilePath(filePathOnDisk.toFile().getAbsolutePath());
+                    }
+                }
+                catch (ServiceCallException e)
+                {
+                    logger.error("There was a problem accessing ngas, will attempt to download to cache", e);
+                }
+            }
+            //if the encapsulation file is null, then this spectrum/moment map is from before encapsulation and follows
+            //the generic file path below. this is not possible for cubelets as they post-date this change
+            else if((downloadFile.isEncapsulatedType()) && 
+            		((EncapsulatedFileDescriptor)downloadFile).getEncapsulationFile() != null)
+            {
+            	EncapsulatedFileDescriptor encapsulatedDownloadFile = (EncapsulatedFileDescriptor) downloadFile;
+            	
+                try
+                {
+                    Path filePathOnDisk = dataAccessService
+                            .findFileInNgas(encapsulatedDownloadFile.getEncapsulationFile().getFileId());
+                    if (filePathOnDisk != null)
+                    {
+                        encapsulatedDownloadFile
+                                .setOriginalEncapsulationFilePath(filePathOnDisk.toFile().getAbsolutePath());
+                    }
+                }
+                catch (ServiceCallException e)
+                {
+                    logger.error("There was a problem accessing ngas, will attempt to download to cache", e);
+                }
+            }
+            else if (downloadFile.getFileType() != FileType.ERROR)
+            {
+                FileDescriptor dFile = (FileDescriptor) downloadFile;
+                try
+                {
+                    Path filePathOnDisk = dataAccessService.findFileInNgasIfOnDisk(dFile.getFileId());
+                    if (filePathOnDisk != null)
+                    {
+                        dFile.setOriginalFilePath(filePathOnDisk.toFile().getAbsolutePath());
                     }
                 }
                 catch (ServiceCallException e)
@@ -268,10 +353,14 @@ public class Packager
             throws CacheException, CatalogueRetrievalException, CreateChecksumException, InterruptedException
     {
         DateTime jobExpiryDate = DateTime.now(DateTimeZone.UTC).plusHours(hoursToExpiryForJob);
+        long startTime = (new Date()).getTime();
+        int numLoops = 0;
+        Map<String, CachedFile> retrievedParentFiles = new HashMap<>();
 
         while (true)
         {
-            logger.debug("Polling for downloaded files for job request id {}", job.getRequestId());
+            logger.info("Polling for downloaded files for job request id {}", job.getRequestId());
+            numLoops++;
 
             boolean allFilesAvailable = true;
             for (DownloadFile requiredFile : files)
@@ -299,47 +388,83 @@ public class Packager
                                 .add(DataLocation.VO_TOOLS).add(DataLocation.DATA_ACCESS).add(requiredFile.getSizeKb())
                                 .add(requiredFile.getFileId()).toString());
                     }
-                    else if (requiredFile.getFileType() == FileType.IMAGE_CUTOUT)
+                    else if (requiredFile.getFileType() == FileType.IMAGE_CUTOUT
+                            || requiredFile.getFileType() == FileType.GENERATED_SPECTRUM)
                     {
-                        if (cacheManager.isCachedFileAvailable(requiredFile))
+                        GeneratedFileDescriptor generatedFileDescriptor = (GeneratedFileDescriptor) requiredFile;
+                        if (generatedFileDescriptor.getOriginalImageFilePath() == null)
                         {
-                            // update the file size- also sets cached file to available
-                            long filesizeKb = cacheManager.updateSizeForCachedFile(job, requiredFile);
-                            createChecksumFile(new File(cacheManager.getCachedFile(requiredFile.getFileId()).getPath()));
-                            requiredFile.setSizeKb(filesizeKb);
-                            requiredFile.setComplete(true);
-                        }
-                        else
-                        {
-                            allFilesAvailable = false;
-                            /* check if the image is available */
-                            CutoutFileDescriptor cutoutFileDescriptor = (CutoutFileDescriptor) requiredFile;
-                            /*
-                             * if the original file is ready to process, update the cached file table so it will be
-                             * picked up
-                             */
-                            if (cutoutFileDescriptor.getOriginalImageFilePath() == null && cacheManager
-                                    .isCachedFileAvailable(cutoutFileDescriptor.getOriginalImageDownloadFile()))
+                            String parentFileId = generatedFileDescriptor.getOriginalImageDownloadFile().getFileId();
+                            CachedFile parentCachedFile = retrievedParentFiles.containsKey(parentFileId)
+                                    ? retrievedParentFiles.get(parentFileId) : cacheManager.getCachedFile(parentFileId);
+                            if (!parentCachedFile.isFileAvailableFlag())
                             {
-                                CachedFile imageForCutoutCachedFile = cacheManager
-                                        .getCachedFile(cutoutFileDescriptor.getOriginalImageDownloadFile().getFileId());
-                                cacheManager.updateOriginalFilePath(requiredFile, imageForCutoutCachedFile.getPath());
-                                cutoutFileDescriptor.setOriginalImageFilePath(imageForCutoutCachedFile.getPath());
+                                downloadManager.pollJobManagerForDownloadJob(parentCachedFile);
+                            }
+                            if (parentCachedFile.isFileAvailableFlag())
+                            {
+                                cacheManager.updateOriginalFilePath(requiredFile, parentCachedFile.getPath());
+                                generatedFileDescriptor.setOriginalImageFilePath(parentCachedFile.getPath());
+                                retrievedParentFiles.put(parentFileId, parentCachedFile);
+                            }
+                            else
+                            {
+                                allFilesAvailable = false;
+                                continue;
                             }
                         }
+
+                        allFilesAvailable = checkFileAvailable(allFilesAvailable, requiredFile);
                     }
-                    else if (cacheManager.isCachedFileAvailable(requiredFile))
+                    else if (requiredFile.isEncapsulatedType() 
+                    		&& ((EncapsulatedFileDescriptor) requiredFile).getEncapsulationFile() != null)
                     {
+                        EncapsulatedFileDescriptor encapsulatedFileDescriptor =
+                                (EncapsulatedFileDescriptor) requiredFile;
+                        if (encapsulatedFileDescriptor.getOriginalEncapsulationFilePath() == null)
+                        {
+                            String parentFileId = encapsulatedFileDescriptor.getEncapsulationFile().getFileId();
+                            CachedFile encapsulationCachedFile = retrievedParentFiles.containsKey(parentFileId)
+                                    ? retrievedParentFiles.get(parentFileId) : cacheManager.getCachedFile(parentFileId);
+                            if (!encapsulationCachedFile.isFileAvailableFlag())
+                            {
+                                downloadManager.pollJobManagerForDownloadJob(encapsulationCachedFile);
+                            }
+                            if (encapsulationCachedFile.isFileAvailableFlag())
+                            {
+                                cacheManager.updateOriginalFilePath(requiredFile, encapsulationCachedFile.getPath());
+                                encapsulatedFileDescriptor
+                                        .setOriginalEncapsulationFilePath(encapsulationCachedFile.getPath());
+                                retrievedParentFiles.put(parentFileId, encapsulationCachedFile);
+                            }
+                            else
+                            {
+                                allFilesAvailable = false;
+                                continue;
+                            }
+                        }
+
+                        allFilesAvailable = checkFileAvailable(allFilesAvailable, requiredFile);
+                    }
+                    else if (requiredFile.getFileType() == FileType.ERROR)
+                    {
+                        writeErrorFileAndChecksum(cacheManager.getJobDirectory(job),
+                                (ErrorFileDescriptor) requiredFile);
+                        long filesizeKb = cacheManager.updateSizeForCachedFile(job, requiredFile);
+                        requiredFile.setSizeKb(filesizeKb);
                         requiredFile.setComplete(true);
                     }
                     else
                     {
-                        allFilesAvailable = false;
+                        allFilesAvailable = checkFileAvailable(allFilesAvailable, requiredFile);
                     }
                 }
             }
             if (allFilesAvailable)
             {
+                long endTime = (new Date()).getTime();
+                logger.info("All files available for page of job request id {} after {} loops taking {} ms",
+                        job.getRequestId(), numLoops, (endTime - startTime));
                 return;
             }
             logger.debug("Starting sleep for job request id {}", job.getRequestId());
@@ -348,33 +473,67 @@ public class Packager
         }
     }
 
-    /**
-     * Creates a checksum file for a given file. The destination will be file.checksum
-     * 
-     * @param file
-     *            the file to calculate the checksum for
-     * @throws CreateChecksumException
-     *             if there is a problem creating the checksum file
-     */
-    protected void createChecksumFile(File file) throws CreateChecksumException
+    private boolean checkFileAvailable(boolean allFilesAvailable, DownloadFile requiredFile) throws CacheException
     {
-        logger.debug("Creating checksum file for: {} exists: {}", file, file.exists());
+        CachedFile cachedFile = cacheManager.getCachedFile(requiredFile.getFileId());
+        if (cachedFile == null)
+        {
+            throw new CacheException("Space hasn't been reserved for file " + requiredFile.getFileId());
+        }
+
+        downloadManager.pollJobManagerForDownloadJob(cachedFile);
+        if (cachedFile.isFileAvailableFlag())
+        {
+            requiredFile.setComplete(true);
+        }
+        else
+        {
+            allFilesAvailable = false;
+        }
+        return allFilesAvailable;
+    }
+
+    /**
+     * Check if the specified cache file has finished processing and is available in the cache. This will prompt 
+     * scheduling of the job if it is not already in the queue.
+     *  
+     * @param cachedFile The file to be retrieved or generated.
+     * @return True if the file is in the cache, false if it is still being retrieved.
+     * @throws CacheException When the file cannot be retrieved or generated.
+     */
+    public boolean checkFileAvailable(CachedFile cachedFile) throws CacheException
+    {
+        downloadManager.pollJobManagerForDownloadJob(cachedFile);
+        return cachedFile.isFileAvailableFlag();
+    }
+
+    /**
+     * Write the error message to a file along with a checksum. The file will be named according to the fileId of the
+     * errorFileDesc.
+     * 
+     * @param jobDir
+     *            The folder to write the files to.
+     * @param errorFileDesc
+     *            The description of the error file and message.
+     * @throws CacheException
+     *             If the error file cannot be written.
+     * @throws CreateChecksumException
+     *             If the checksum file cannot be written.
+     */
+    void writeErrorFileAndChecksum(File jobDir, ErrorFileDescriptor errorFileDesc)
+            throws CacheException, CreateChecksumException
+    {
+        logger.debug("Creating error file for: {}", errorFileDesc.getFilename());
         try
         {
-            String response = inlineScriptService.callScriptInline(calculateChecksumScript, file.getCanonicalPath());
-            if (StringUtils.isNotBlank(response))
-            {
-                FileUtils.writeStringToFile(new File(file.getCanonicalPath() + ".checksum"), response);
-            }
-            else
-            {
-                throw new CreateChecksumException(
-                        "Script generated an empty checksum response for file: " + file.getCanonicalPath());
-            }
+            File file = new File(jobDir, errorFileDesc.getFilename());
+            File errorFile = new File(file.getCanonicalPath());
+            FileUtils.writeStringToFile(errorFile, errorFileDesc.getErrorMessage());
+            downloadManager.createChecksumFile(errorFile);
         }
-        catch (IOException | InlineScriptException e)
+        catch (IOException e)
         {
-            throw new CreateChecksumException(e);
+            throw new CacheException("Unable to write error file " + errorFileDesc.getFilename(), e);
         }
     }
 
