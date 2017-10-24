@@ -92,6 +92,7 @@ import au.csiro.casda.access.util.Utils;
 import au.csiro.casda.access.uws.AccessJobManager;
 import au.csiro.casda.access.uws.TestAccessUwsFactory;
 import au.csiro.casda.entity.dataaccess.DataAccessJob;
+import au.csiro.casda.entity.dataaccess.DataAccessJobStatus;
 import au.csiro.casda.entity.observation.ImageCube;
 import au.csiro.casda.entity.observation.MeasurementSet;
 import au.csiro.casda.entity.observation.Observation;
@@ -1472,6 +1473,8 @@ public class AsyncFunctionalTest
                 new Period(completion.plusHours(this.hoursToExpiryDefault), dataAccessJob.getExpiredTimestamp())
                         .toStandardSeconds().getSeconds(),
                 allOf(is(greaterThanOrEqualTo(0)), is(lessThanOrEqualTo(10))));
+        assertThat(dataAccessJob.getErrorMessage(), is(nullValue()));
+        assertThat(dataAccessJob.getStatus(), is(DataAccessJobStatus.READY));
 
         /*
          * Override certain fields so they match the test file
